@@ -12,17 +12,11 @@ import Profile from './pages/Profile'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
-  const { isAuthenticated } = useAuthStore()
-
   return (
     <Router>
       <Routes>
-        <Route path="/login" element={
-          isAuthenticated ? <Navigate to="/dashboard" /> : <Login />
-        } />
-        <Route path="/register" element={
-          isAuthenticated ? <Navigate to="/dashboard" /> : <Register />
-        } />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
         
         <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
           <Route path="/dashboard" element={<Dashboard />} />

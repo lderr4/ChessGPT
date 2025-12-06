@@ -20,6 +20,18 @@ class Settings(BaseSettings):
     STOCKFISH_DEPTH: int = 20
     STOCKFISH_TIME_LIMIT: float = 1.0
     
+    # AI Chess Coach
+    ENABLE_COACH: bool = False
+    COACH_PROVIDER: str = "ollama"  # Options: "openai", "ollama"
+    
+    # OpenAI Settings (paid)
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4"
+    
+    # Ollama Settings (free, local)
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama3.1"  # or "mistral", "phi3", etc.
+    
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
     

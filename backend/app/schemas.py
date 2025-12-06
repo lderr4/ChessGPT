@@ -63,6 +63,7 @@ class MoveResponse(BaseModel):
     classification: Optional[str]
     centipawn_loss: Optional[float]
     best_move_uci: Optional[str]
+    coach_commentary: Optional[str]
     
     class Config:
         from_attributes = True

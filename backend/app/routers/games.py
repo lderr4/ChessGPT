@@ -8,7 +8,9 @@ from ..schemas import (
     GameResponse, 
     GameDetailResponse, 
     GameImportRequest,
-    MoveResponse
+    MoveResponse,
+    PositionAnalysisRequest,
+    PositionAnalysisResponse
 )
 from ..auth import get_current_user
 from ..services.chess_com_service import ChessComService
@@ -381,6 +383,25 @@ async def analyze_game(
         "message": "Game analysis started",
         "status": "processing"
     }
+
+
+@router.post("/analyze/position", response_model=PositionAnalysisResponse)
+async def analyze_position(
+    request: PositionAnalysisRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """Analyze a specific chess position (FEN string)"""
+    
+    analysis_service = AnalysisService()
+    result = await analysis_service.analyze_position(request.fen)
+    
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    
+    # Add FEN to the response
+    result["fen"] = request.fen
+    
+    return result
 
 
 @router.delete("/{game_id}", status_code=204)

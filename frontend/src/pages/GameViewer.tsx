@@ -30,6 +30,7 @@ interface Move {
   classification: string | null;
   centipawn_loss: number | null;
   best_move_uci: string | null;
+  coach_commentary: string | null;
 }
 
 interface GameDetail {
@@ -714,6 +715,23 @@ const GameViewer = () => {
                     </span>
                   </div>
                 </div>
+
+                {/* Coach Commentary */}
+                {currentMove.coach_commentary && (
+                  <div className="mt-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 border-l-4 border-purple-500 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <div className="text-2xl">🎓</div>
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-purple-900 mb-1">
+                          Coach's Insight
+                        </h4>
+                        <p className="text-gray-800 text-sm leading-relaxed">
+                          {currentMove.coach_commentary}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -779,6 +797,14 @@ const GameViewer = () => {
                             movePair.white.classification
                           )}
                         </span>
+                        {movePair.white.coach_commentary && (
+                          <span
+                            className="ml-1 text-purple-600"
+                            title="Coach commentary available"
+                          >
+                            🎓
+                          </span>
+                        )}
                       </button>
                     )}
 
@@ -801,6 +827,14 @@ const GameViewer = () => {
                             movePair.black.classification
                           )}
                         </span>
+                        {movePair.black.coach_commentary && (
+                          <span
+                            className="ml-1 text-purple-600"
+                            title="Coach commentary available"
+                          >
+                            🎓
+                          </span>
+                        )}
                       </button>
                     ) : (
                       <div className="flex-1"></div>

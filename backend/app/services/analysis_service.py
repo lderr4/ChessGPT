@@ -4,6 +4,7 @@ import chess.engine
 from io import StringIO
 from typing import List, Dict, Optional, Tuple
 from ..config import settings
+from .coach_service import CoachService
 
 
 class AnalysisService:
@@ -13,6 +14,7 @@ class AnalysisService:
         self.stockfish_path = settings.STOCKFISH_PATH
         self.depth = settings.STOCKFISH_DEPTH
         self.time_limit = settings.STOCKFISH_TIME_LIMIT
+        self.coach_service = CoachService()
     
     def parse_pgn(self, pgn_string: str) -> Optional[chess.pgn.Game]:
         """Parse a PGN string into a chess.pgn.Game object"""
@@ -182,6 +184,39 @@ class AnalysisService:
                     elif classification == "inaccuracy":
                         inaccuracies += 1
                 
+                # Generate coach commentary for user's key moves
+                coach_commentary = None
+                if should_analyze and classification in ["blunder", "mistake", "inaccuracy"]:
+                    try:
+                        # Determine game phase
+                        phase = "opening" if half_move < 20 else ("endgame" if half_move > len(all_moves) * 0.7 else "middlegame")
+                        
+                        # Get FEN before the move (we need to rewind one move)
+                        temp_board = chess.Board()
+                        for i in range(half_move):
+                            temp_board.push(all_moves[i]['move'])
+                        fen_before = temp_board.fen()
+                        
+                        # Get best move in SAN
+                        best_move_san = None
+                        if best_move:
+                            best_move_san = temp_board.san(best_move)
+                        
+                        # Generate commentary
+                        coach_commentary = await self.coach_service.generate_move_commentary(
+                            move_san=move_san,
+                            classification=classification,
+                            centipawn_loss=cp_loss if cp_loss else 0,
+                            fen_before=fen_before,
+                            fen_after=board.fen(),
+                            best_move_san=best_move_san,
+                            game_phase=phase,
+                            user_color=user_color
+                        )
+                    except Exception as e:
+                        print(f"Error generating coach commentary: {e}")
+                        coach_commentary = None
+                
                 # Store move analysis
                 moves_analysis.append({
                     "move_number": move_number,
@@ -194,6 +229,7 @@ class AnalysisService:
                     "best_move_uci": best_move.uci() if best_move else None,
                     "classification": classification,
                     "centipawn_loss": cp_loss,
+                    "coach_commentary": coach_commentary,
                 })
                 
                 if not is_white_move:

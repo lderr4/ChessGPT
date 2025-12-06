@@ -103,6 +103,9 @@ class Move(Base):
     classification = Column(String, nullable=True)  # 'book', 'best', 'excellent', 'good', 'inaccuracy', 'mistake', 'blunder'
     centipawn_loss = Column(Float, nullable=True)
     
+    # AI Coach Commentary
+    coach_commentary = Column(Text, nullable=True)
+    
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     

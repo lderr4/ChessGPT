@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 
@@ -8,29 +8,48 @@ const Register = () => {
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [chessComUsername, setChessComUsername] = useState('')
-  const [error, setError] = useState('')
-  const { register, isLoading } = useAuthStore()
+  const [localError, setLocalError] = useState('')
+  const { register, isLoading, isAuthenticated, error: storeError, clearError } = useAuthStore()
   const navigate = useNavigate()
+  const hasRedirected = useRef(false)
+
+  // Clear error when component unmounts
+  useEffect(() => {
+    return () => {
+      clearError();
+      setLocalError('');
+    };
+  }, [clearError]);
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated && !hasRedirected.current) {
+      hasRedirected.current = true
+      navigate('/dashboard', { replace: true })
+    }
+  }, [isAuthenticated, navigate])
+
+  const error = localError || storeError
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setError('')
+    setLocalError('')
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match')
+      setLocalError('Passwords do not match')
       return
     }
 
     if (password.length < 8) {
-      setError('Password must be at least 8 characters')
+      setLocalError('Password must be at least 8 characters')
       return
     }
 
     try {
       await register(email, username, password, chessComUsername || undefined)
-      navigate('/dashboard')
+      // Navigation handled by useEffect when isAuthenticated changes
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Registration failed. Please try again.')
+      // Error is now handled in the store
     }
   }
 
@@ -43,11 +62,15 @@ const Register = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-              {error}
-            </div>
-          )}
+          <div
+            className={`bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm transition-all duration-200 ${
+              error
+                ? "opacity-100 max-h-20"
+                : "opacity-0 max-h-0 overflow-hidden border-0 py-0"
+            }`}
+          >
+            {error || "\u00A0"}
+          </div>
 
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">

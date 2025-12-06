@@ -14,20 +14,25 @@ interface AuthState {
   user: User | null
   isAuthenticated: boolean
   isLoading: boolean
+  error: string | null
   login: (username: string, password: string) => Promise<void>
   register: (email: string, username: string, password: string, chessComUsername?: string) => Promise<void>
   logout: () => void
   fetchUser: () => Promise<void>
   updateProfile: (data: { chess_com_username?: string }) => Promise<void>
+  clearError: () => void
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   isAuthenticated: !!localStorage.getItem('access_token'),
   isLoading: false,
+  error: null,
+
+  clearError: () => set({ error: null }),
 
   login: async (username: string, password: string) => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       const response = await authAPI.login({ username, password })
       const { access_token, refresh_token } = response.data
@@ -41,15 +46,20 @@ export const useAuthStore = create<AuthState>((set) => ({
         user: userResponse.data,
         isAuthenticated: true,
         isLoading: false,
+        error: null,
       })
-    } catch (error) {
-      set({ isLoading: false })
+    } catch (error: any) {
+      // Clean up tokens if login process fails
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      const errorMessage = error.response?.data?.detail || 'Login failed. Please try again.'
+      set({ isLoading: false, error: errorMessage })
       throw error
     }
   },
 
   register: async (email: string, username: string, password: string, chessComUsername?: string) => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       await authAPI.register({
         email,
@@ -70,9 +80,14 @@ export const useAuthStore = create<AuthState>((set) => ({
         user: userResponse.data,
         isAuthenticated: true,
         isLoading: false,
+        error: null,
       })
-    } catch (error) {
-      set({ isLoading: false })
+    } catch (error: any) {
+      // Clean up tokens if registration/login process fails
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      const errorMessage = error.response?.data?.detail || 'Registration failed. Please try again.'
+      set({ isLoading: false, error: errorMessage })
       throw error
     }
   },
