@@ -1,8 +1,8 @@
-# Chess Analytics Platform - Project Summary
+# ChessGPT - Project Summary
 
 ## Overview
 
-I've successfully built a complete, production-ready chess analytics web application based on your initial chess.py script. The platform allows users to track their Chess.com games, analyze them with Stockfish, and visualize their chess journey with comprehensive statistics.
+The platform allows users to track their Chess.com games, analyze them with Stockfish, and visualize their chess journey with comprehensive statistics.
 
 ## What's Been Built
 
