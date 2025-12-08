@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from ..database import get_db
-from ..models import User, Game, Move, ImportJob
+from ..models import User, Game, Move, ImportJob, AnalysisJob
 from ..schemas import (
     GameResponse, 
     GameDetailResponse, 
@@ -360,6 +360,7 @@ def get_game(
 async def analyze_game(
     game_id: int,
     background_tasks: BackgroundTasks,
+    force: bool = Query(False, description="Force re-analysis even if already analyzed"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -373,14 +374,21 @@ async def analyze_game(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
     
-    if game.is_analyzed:
+    if game.is_analyzed and not force:
         return {"message": "Game already analyzed", "status": "completed"}
+    
+    # If forcing re-analysis, delete existing moves and reset analysis flag
+    if force and game.is_analyzed:
+        db.query(Move).filter(Move.game_id == game_id).delete()
+        game.is_analyzed = False
+        game.analyzed_at = None
+        db.commit()
     
     # Start background analysis
     background_tasks.add_task(analyze_game_background, game_id, db)
     
     return {
-        "message": "Game analysis started",
+        "message": "Game analysis started" if not force else "Game re-analysis started",
         "status": "processing"
     }
 
@@ -402,6 +410,151 @@ async def analyze_position(
     result["fen"] = request.fen
     
     return result
+
+
+async def analyze_all_games_background(user_id: int, job_id: int, db: Session):
+    """Background task to analyze all unanalyzed games for a user"""
+    job = db.query(AnalysisJob).filter(AnalysisJob.id == job_id).first()
+    
+    try:
+        # Update job status
+        job.status = "processing"
+        job.started_at = datetime.utcnow()
+        db.commit()
+        
+        # Get all unanalyzed games for this user
+        games = db.query(Game).filter(
+            Game.user_id == user_id,
+            Game.is_analyzed == False
+        ).all()
+        
+        job.total_games = len(games)
+        db.commit()
+        
+        if len(games) == 0:
+            job.status = "completed"
+            job.completed_at = datetime.utcnow()
+            job.progress = 100
+            db.commit()
+            return
+        
+        # Analyze each game
+        analysis_service = AnalysisService()
+        for i, game in enumerate(games):
+            try:
+                result = await analysis_service.analyze_game(game.pgn, game.user_color)
+                
+                if "error" not in result:
+                    # Update game with analysis results
+                    stats = result.get("stats", {})
+                    game.is_analyzed = True
+                    game.num_moves = stats.get("num_moves", 0)
+                    game.average_centipawn_loss = stats.get("average_centipawn_loss")
+                    game.accuracy = stats.get("accuracy")
+                    game.num_blunders = stats.get("num_blunders", 0)
+                    game.num_mistakes = stats.get("num_mistakes", 0)
+                    game.num_inaccuracies = stats.get("num_inaccuracies", 0)
+                    game.analyzed_at = datetime.utcnow()
+                    
+                    # Store move analysis
+                    for move_data in result.get("moves", []):
+                        move = Move(
+                            game_id=game.id,
+                            **move_data
+                        )
+                        db.add(move)
+                    
+                    job.analyzed_games += 1
+                else:
+                    # Mark as analyzed even if error to prevent retry
+                    game.is_analyzed = True
+                    game.analyzed_at = datetime.utcnow()
+                
+                # Update progress
+                job.progress = int(((i + 1) / len(games)) * 100)
+                db.commit()
+                
+            except Exception as e:
+                print(f"Error analyzing game {game.id}: {e}")
+                # Mark as analyzed to prevent infinite retries
+                game.is_analyzed = True
+                game.analyzed_at = datetime.utcnow()
+                db.commit()
+        
+        # Update user stats after all analysis
+        StatsService.calculate_user_stats(db, user_id)
+        
+        # Mark job as completed
+        job.status = "completed"
+        job.completed_at = datetime.utcnow()
+        job.progress = 100
+        db.commit()
+        
+    except Exception as e:
+        print(f"Batch analysis job failed: {e}")
+        job.status = "failed"
+        job.error_message = str(e)
+        job.completed_at = datetime.utcnow()
+        db.commit()
+
+
+@router.post("/analyze/all", status_code=202)
+def analyze_all_games(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Start batch analysis of all unanalyzed games"""
+    
+    # Create analysis job
+    job = AnalysisJob(
+        user_id=current_user.id,
+        status="pending",
+        progress=0,
+        total_games=0,
+        analyzed_games=0
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    
+    # Start background analysis
+    background_tasks.add_task(analyze_all_games_background, current_user.id, job.id, db)
+    
+    return {
+        "message": "Batch analysis started",
+        "job_id": job.id,
+        "status": "pending"
+    }
+
+
+@router.get("/analyze/status/{job_id}")
+def get_analysis_status(
+    job_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get the status of a batch analysis job"""
+    
+    job = db.query(AnalysisJob).filter(
+        AnalysisJob.id == job_id,
+        AnalysisJob.user_id == current_user.id
+    ).first()
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Analysis job not found")
+    
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "progress": job.progress,
+        "total_games": job.total_games,
+        "analyzed_games": job.analyzed_games,
+        "error_message": job.error_message,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "completed_at": job.completed_at
+    }
 
 
 @router.delete("/{game_id}", status_code=204)

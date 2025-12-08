@@ -137,4 +137,10 @@ export const statsAPI = {
   getDashboardStats: () => api.get("/stats/dashboard"),
 
   recalculateStats: () => api.post("/stats/recalculate"),
+
+  getErrorsByPhase: () => api.get("/stats/errors-by-phase"),
+
+  getWinLossCorrelation: () => api.get("/stats/win-loss-correlation"),
+
+  getPerformanceByPhase: () => api.get("/stats/performance-by-phase"),
 };

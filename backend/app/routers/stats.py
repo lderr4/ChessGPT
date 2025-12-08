@@ -92,3 +92,35 @@ def recalculate_stats(
         "status": "completed"
     }
 
+
+@router.get("/errors-by-phase")
+def get_errors_by_phase(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get error distribution by game phase (opening/middlegame/endgame)"""
+    
+    error_stats = StatsService.get_error_analysis_by_phase(db, current_user.id)
+    return error_stats
+
+
+@router.get("/win-loss-correlation")
+def get_win_loss_correlation(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get correlation between errors and game outcomes"""
+    
+    correlation = StatsService.get_win_loss_error_correlation(db, current_user.id)
+    return correlation
+
+
+@router.get("/performance-by-phase")
+def get_performance_by_phase(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get performance statistics by game phase"""
+    
+    phase_performance = StatsService.get_performance_by_phase(db, current_user.id)
+    return phase_performance

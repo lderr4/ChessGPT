@@ -67,12 +67,89 @@ const GameViewer = () => {
   const [liveEvaluation, setLiveEvaluation] = useState<number | null>(null);
   const [liveBestMove, setLiveBestMove] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [moveHighlight, setMoveHighlight] = useState<{from: string; to: string} | null>(null);
+
+  // Helper function to format coach commentary
+  const formatCoachCommentary = (text: string) => {
+    // Remove any markdown formatting
+    let cleaned = text.replace(/\*\*/g, '');
+    
+    // Split into sentences for better readability
+    const sentences = cleaned
+      .split(/(?<=[.!?])\s+/)
+      .filter(s => s.trim().length > 0);
+    
+    return sentences;
+  };
+
+  // Calculate material advantage
+  const calculateMaterialAdvantage = (fen: string) => {
+    const pieces = fen.split(' ')[0];
+    const materialValues: Record<string, number> = {
+      'q': 9, 'Q': 9,
+      'r': 5, 'R': 5,
+      'b': 3, 'B': 3,
+      'n': 3, 'N': 3,
+      'p': 1, 'P': 1
+    };
+    
+    let whiteMaterial = 0;
+    let blackMaterial = 0;
+    
+    for (const char of pieces) {
+      if (materialValues[char]) {
+        if (char === char.toUpperCase()) {
+          whiteMaterial += materialValues[char];
+        } else {
+          blackMaterial += materialValues[char];
+        }
+      }
+    }
+    
+    const diff = whiteMaterial - blackMaterial;
+    const advantage = Math.abs(diff);
+    const side = diff > 0 ? 'white' : diff < 0 ? 'black' : 'equal';
+    
+    // Determine piece icon for advantage
+    let pieceIcon = '';
+    if (advantage >= 9) pieceIcon = side === 'white' ? '♕' : '♛';
+    else if (advantage >= 5) pieceIcon = side === 'white' ? '♖' : '♜';
+    else if (advantage >= 3) pieceIcon = side === 'white' ? '♗' : '♝';
+    else if (advantage >= 1) pieceIcon = side === 'white' ? '♙' : '♟';
+    
+    return { advantage, side, pieceIcon };
+  };
 
   useEffect(() => {
     if (gameId) {
       fetchGame(parseInt(gameId));
     }
   }, [gameId]);
+
+  // Add keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!game) return;
+      
+      // Prevent default behavior for arrow keys
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+        e.preventDefault();
+        
+        if (e.key === 'ArrowLeft') {
+          goToPrevious();
+        } else if (e.key === 'ArrowRight') {
+          goToNext();
+        } else if (e.key === 'ArrowUp') {
+          goToStart();
+        } else if (e.key === 'ArrowDown') {
+          goToEnd();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [game, currentMoveIndex]); // Re-attach when game or move index changes
 
   const fetchGame = async (id: number) => {
     try {
@@ -91,6 +168,7 @@ const GameViewer = () => {
   const goToMove = (moveIndex: number) => {
     chess.reset();
 
+    let lastMove = null;
     if (moveIndex >= 0 && game) {
       const pgn = game.pgn;
       chess.loadPgn(pgn);
@@ -98,12 +176,22 @@ const GameViewer = () => {
 
       chess.reset();
       for (let i = 0; i <= moveIndex && i < history.length; i++) {
-        chess.move(history[i]);
+        const move = chess.move(history[i]);
+        if (i === moveIndex) {
+          lastMove = move;
+        }
       }
     }
 
     setCurrentPosition(chess.fen());
     setCurrentMoveIndex(moveIndex);
+
+    // Set move highlighting for the current move
+    if (lastMove) {
+      setMoveHighlight({ from: lastMove.from, to: lastMove.to });
+    } else {
+      setMoveHighlight(null);
+    }
 
     // If in analysis mode, analyze the new position
     if (isAnalysisMode) {
@@ -309,18 +397,18 @@ const GameViewer = () => {
         Back to Games
       </button>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Chess Board */}
         <div className="lg:col-span-2">
-          <div className="bg-white rounded-xl shadow-sm p-6">
+          <div className="bg-white rounded-xl shadow-sm p-4">
             {/* Game Info */}
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-4">
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-3">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900">
+                  <h2 className="text-xl font-bold text-gray-900">
                     {game.white_player} vs {game.black_player}
                   </h2>
-                  <p className="text-gray-600">
+                  <p className="text-sm text-gray-600">
                     {game.opening_name} ({game.opening_eco}) • {game.time_class}
                   </p>
                 </div>
@@ -362,26 +450,33 @@ const GameViewer = () => {
             </div>
 
             {/* Analysis Mode Toggle */}
-            <div className="mb-4 flex items-center justify-between">
-              <button
-                onClick={toggleAnalysisMode}
-                className={`px-4 py-2 rounded-lg font-medium transition ${
-                  isAnalysisMode
-                    ? "bg-purple-600 text-white hover:bg-purple-700"
-                    : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                }`}
-              >
-                {isAnalysisMode
-                  ? "🔬 Analysis Mode: ON"
-                  : "🔬 Enable Analysis Mode"}
-              </button>
-              {isAnalysisMode && (
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
                 <button
-                  onClick={resetToGamePosition}
-                  className="px-4 py-2 rounded-lg font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition"
+                  onClick={toggleAnalysisMode}
+                  className={`px-4 py-2 rounded-lg font-medium transition ${
+                    isAnalysisMode
+                      ? "bg-purple-600 text-white hover:bg-purple-700"
+                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                  }`}
                 >
-                  Reset to Game
+                  {isAnalysisMode
+                    ? "🔬 Analysis Mode: ON"
+                    : "🔬 Enable Analysis Mode"}
                 </button>
+                {isAnalysisMode && (
+                  <button
+                    onClick={resetToGamePosition}
+                    className="px-4 py-2 rounded-lg font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 transition"
+                  >
+                    Reset to Game
+                  </button>
+                )}
+              </div>
+              {isAnalysisMode && (
+                <div className="text-xs text-gray-500 italic">
+                  💡 Live analysis may differ slightly from game analysis due to engine calculation variations
+                </div>
               )}
             </div>
 
@@ -445,11 +540,64 @@ const GameViewer = () => {
               </div>
             )}
 
+            {/* Current Move Display */}
+            <div className="mb-3 p-3 bg-gradient-to-r from-primary-50 to-primary-100 rounded-lg border-2 border-primary-300">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">♟️</span>
+                  <div>
+                    <p className="text-xs text-gray-600 font-medium">Current Position</p>
+                    {currentMove && currentMoveIndex >= 0 ? (
+                      <p className="text-2xl font-bold text-gray-900">
+                        {currentMove.move_number}.
+                        {currentMove.is_white ? " " : "... "}
+                        {currentMove.move_san}
+                      </p>
+                    ) : (
+                      <p className="text-2xl font-bold text-gray-900">
+                        Starting Position
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  {/* Material Advantage */}
+                  {(() => {
+                    const material = calculateMaterialAdvantage(currentPosition);
+                    if (material.advantage > 0) {
+                      return (
+                        <div className={`px-3 py-1 rounded-lg font-semibold flex items-center gap-1 ${
+                          material.side === 'white' 
+                            ? 'bg-gray-100 text-gray-800' 
+                            : 'bg-gray-800 text-white'
+                        }`}>
+                          <span className="text-xl">{material.pieceIcon}</span>
+                          <span className="text-sm">+{material.advantage}</span>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                  
+                  {currentMove?.classification && (
+                    <span
+                      className={`px-3 py-1 rounded-full text-sm font-semibold ${getClassificationColor(
+                        currentMove.classification
+                      )}`}
+                    >
+                      {currentMove.classification}
+                      {getClassificationSymbol(currentMove.classification)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
             {/* Board */}
-            <div className="mb-6">
+            <div className="mb-4">
               <Chessboard
                 position={currentPosition}
-                boardWidth={Math.min(600, window.innerWidth - 100)}
+                boardWidth={Math.min(500, window.innerWidth - 100)}
                 boardOrientation={
                   game.user_color === "white" ? "white" : "black"
                 }
@@ -461,54 +609,73 @@ const GameViewer = () => {
                     ? "0 0 0 3px rgba(139, 92, 246, 0.3)"
                     : "none",
                 }}
+                customSquareStyles={
+                  moveHighlight
+                    ? {
+                        [moveHighlight.from]: {
+                          backgroundColor: "rgba(255, 255, 0, 0.4)",
+                        },
+                        [moveHighlight.to]: {
+                          backgroundColor: "rgba(255, 255, 0, 0.6)",
+                        },
+                      }
+                    : {}
+                }
               />
               {isAnalysisMode && (
                 <div className="mt-2 text-center text-sm text-purple-600 font-medium">
                   🎯 Make moves on the board to see live engine analysis
                 </div>
               )}
+              {!isAnalysisMode && moveHighlight && (
+                <div className="mt-2 text-center text-xs text-gray-500">
+                  💡 Tip: Use arrow keys to navigate
+                </div>
+              )}
             </div>
 
-            {/* Controls */}
-            <div className="flex items-center justify-center gap-2">
+            {/* Controls - Centered and Prominent */}
+            <div className="flex items-center justify-center gap-3">
               <button
                 onClick={goToStart}
-                className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                title="Start"
+                className="p-3 border-2 border-gray-400 rounded-lg hover:bg-gray-100 hover:border-primary-500 transition-all active:scale-95"
+                title="Start (↑)"
               >
-                <SkipBack size={20} />
+                <SkipBack size={24} className="text-gray-700" />
               </button>
               <button
                 onClick={goToPrevious}
-                className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                title="Previous"
+                className="p-4 border-2 border-primary-400 rounded-lg hover:bg-primary-50 hover:border-primary-600 transition-all active:scale-95 shadow-sm"
+                title="Previous (←)"
               >
-                <ChevronLeft size={20} />
+                <ChevronLeft size={32} className="text-primary-600" />
               </button>
               <button
                 onClick={goToNext}
-                className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                title="Next"
+                className="p-4 border-2 border-primary-400 rounded-lg hover:bg-primary-50 hover:border-primary-600 transition-all active:scale-95 shadow-sm"
+                title="Next (→)"
               >
-                <ChevronRight size={20} />
+                <ChevronRight size={32} className="text-primary-600" />
               </button>
               <button
                 onClick={goToEnd}
-                className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                title="End"
+                className="p-3 border-2 border-gray-400 rounded-lg hover:bg-gray-100 hover:border-primary-500 transition-all active:scale-95"
+                title="End (↓)"
               >
-                <SkipForward size={20} />
+                <SkipForward size={24} className="text-gray-700" />
               </button>
             </div>
 
-            {/* Evaluation Graph */}
+            {/* Evaluation Graph - Collapsible */}
             {game.is_analyzed && game.moves.length > 0 && (
-              <div className="mt-6">
-                <h3 className="font-semibold text-gray-900 mb-3">
-                  Game Evaluation
-                </h3>
-                <div className="bg-gray-50 rounded-lg p-4">
-                  <ResponsiveContainer width="100%" height={250}>
+              <div className="mt-4">
+                <details className="group">
+                  <summary className="cursor-pointer font-semibold text-gray-900 mb-3 flex items-center gap-2 hover:text-primary-600">
+                    <span className="group-open:rotate-90 transition-transform">▶</span>
+                    📈 Game Evaluation Graph
+                  </summary>
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <ResponsiveContainer width="100%" height={200}>
                     <LineChart
                       data={prepareChartData()}
                       onClick={(data) => {
@@ -648,100 +815,95 @@ const GameViewer = () => {
                     </LineChart>
                   </ResponsiveContainer>
 
-                  {/* Phase Legend */}
-                  <div className="flex items-center justify-center gap-6 mt-4 text-sm">
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 bg-blue-100 border border-blue-400 rounded"></div>
-                      <span className="text-gray-700">
-                        Opening (1-10 moves)
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 bg-green-100 border border-green-400 rounded"></div>
-                      <span className="text-gray-700">Middlegame</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 bg-amber-100 border border-amber-400 rounded"></div>
-                      <span className="text-gray-700">Endgame</span>
+                    {/* Graph Legend */}
+                    <div className="mt-3 text-center text-xs text-gray-500">
+                      Click on any point to jump to that move
                     </div>
                   </div>
-                </div>
-              </div>
-            )}
-
-            {/* Current Move Info */}
-            {currentMove && game.is_analyzed && (
-              <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-                <h3 className="font-semibold text-gray-900 mb-2">
-                  Move Analysis
-                </h3>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-gray-600">Classification: </span>
-                    <span
-                      className={`font-medium ${getClassificationColor(
-                        currentMove.classification
-                      )}`}
-                    >
-                      {currentMove.classification}{" "}
-                      {getClassificationSymbol(currentMove.classification)}
-                    </span>
-                  </div>
-                  {currentMove.centipawn_loss !== null && (
-                    <div>
-                      <span className="text-gray-600">CP Loss: </span>
-                      <span className="font-medium text-gray-900">
-                        {currentMove.centipawn_loss.toFixed(1)}
-                      </span>
-                    </div>
-                  )}
-                  {currentMove.evaluation_after !== null && (
-                    <div>
-                      <span className="text-gray-600">Evaluation: </span>
-                      <span className="font-medium text-gray-900">
-                        {(currentMove.evaluation_after / 100).toFixed(2)}
-                      </span>
-                    </div>
-                  )}
-                  <div>
-                    <span className="text-gray-600">Game Phase: </span>
-                    <span className="font-medium text-primary-600">
-                      {getGamePhase(currentMoveIndex, game.moves.length)
-                        .charAt(0)
-                        .toUpperCase() +
-                        getGamePhase(currentMoveIndex, game.moves.length).slice(
-                          1
-                        )}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Coach Commentary */}
-                {currentMove.coach_commentary && (
-                  <div className="mt-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 border-l-4 border-purple-500 rounded-lg">
-                    <div className="flex items-start gap-3">
-                      <div className="text-2xl">🎓</div>
-                      <div className="flex-1">
-                        <h4 className="font-semibold text-purple-900 mb-1">
-                          Coach's Insight
-                        </h4>
-                        <p className="text-gray-800 text-sm leading-relaxed">
-                          {currentMove.coach_commentary}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                </details>
               </div>
             )}
           </div>
         </div>
 
-        {/* Move List */}
-        <div className="lg:col-span-1">
-          <div className="bg-white rounded-xl shadow-sm p-6">
+        {/* Right Sidebar - Move Analysis & List */}
+        <div className="lg:col-span-1 space-y-4">
+          {/* Current Move Analysis - Prominent Position */}
+          {currentMove && game.is_analyzed && (
+            <div className="bg-white rounded-xl shadow-sm p-4">
+              <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <span>📊</span> Move Analysis
+              </h3>
+              <div className="grid grid-cols-2 gap-3 text-sm mb-3">
+                <div>
+                  <span className="text-gray-600">Classification: </span>
+                  <span
+                    className={`font-medium ${getClassificationColor(
+                      currentMove.classification
+                    )}`}
+                  >
+                    {currentMove.classification}{" "}
+                    {getClassificationSymbol(currentMove.classification)}
+                  </span>
+                </div>
+                {currentMove.centipawn_loss !== null && (
+                  <div>
+                    <span className="text-gray-600">CP Loss: </span>
+                    <span className="font-medium text-gray-900">
+                      {currentMove.centipawn_loss.toFixed(1)}
+                    </span>
+                  </div>
+                )}
+                {currentMove.evaluation_after !== null && (
+                  <div>
+                    <span className="text-gray-600">Evaluation: </span>
+                    <span className="font-medium text-gray-900">
+                      {(currentMove.evaluation_after / 100).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+                <div>
+                  <span className="text-gray-600">Phase: </span>
+                  <span className="font-medium text-primary-600">
+                    {getGamePhase(currentMoveIndex, game.moves.length)
+                      .charAt(0)
+                      .toUpperCase() +
+                      getGamePhase(currentMoveIndex, game.moves.length).slice(1)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Coach Commentary - Prominent */}
+              {currentMove.coach_commentary && (
+                <div className="p-3 bg-gradient-to-r from-purple-50 to-blue-50 border-l-4 border-purple-500 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <div className="text-xl">🎓</div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold text-purple-900 mb-2 text-sm flex items-center gap-1">
+                        <span>Coach's Insight</span>
+                        <span className="text-xs font-normal text-purple-600">
+                          ({currentMove.classification})
+                        </span>
+                      </h4>
+                      <div className="space-y-2">
+                        {formatCoachCommentary(currentMove.coach_commentary).map((sentence, idx) => (
+                          <p key={idx} className="text-gray-800 text-sm leading-relaxed flex items-start gap-2">
+                            <span className="text-purple-400 font-bold mt-0.5">•</span>
+                            <span className="flex-1">{sentence}</span>
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Move List */}
+          <div className="bg-white rounded-xl shadow-sm p-4">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Moves</h3>
-            <div className="space-y-1 max-h-[600px] overflow-y-auto">
+            <div className="space-y-1 max-h-[500px] overflow-y-auto">
               {game.moves
                 .reduce((acc: any[], move, index) => {
                   if (move.is_white) {

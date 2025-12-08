@@ -1,0 +1,40 @@
+Technical Features:
+- analyze all games??
+
+
+How do you get better at Chess??
+
+some sort of prompted way to help users get better at chess.
+
+schedule
+- Force users to type in exactly what causes their blunders
+- 
+
+
+how to analyze a chess game:
+- write down the variations you were thinking and the thoughts you were having
+- in the opening, were you surprised?
+- what was you middle game "plan"
+- did you evaluate your position during the game? what was your evaluation?
+- if you remember getting distracted, take note of that in the notation.
+- correct your blunders / mistakes without using the engine.
+
+Game analysis:
+thedrunkpigeon vs ncforever
+Opening:
+	queens gambit declined, pyramid pawn structure for black. very solid
+	out of the opening, my position is clearly better. I have two pawns in the center. his biship cramped and his pieces have less mobility
+	
+	
+Middlegame:
+	The middlegame begins with a key moment when he pushes to c5 with his pawn. If I push my pawn , I gain complete control of the center, but lose the pawn in the center. 
+	I took his pawn and it was a complete mistake.
+
+	I missed a tactic: I needed to see that if I pushed my e pawn, his knight would go to he middle. Then, I could do a discover attack while taking the knight in the middle.
+
+
+Endgame:
+	There was a mass trade of pieces.
+	Then I activated my queen. I had the opportunity to check his king and create a bit of an advantage. I should have calculated this further.
+
+	Completely winning. Then make one fatal error and lose. I saw that he was way ahead on time and started panicking a bit

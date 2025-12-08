@@ -1,6 +1,7 @@
 import chess
 import chess.pgn
 import chess.engine
+import asyncio
 from io import StringIO
 from typing import List, Dict, Optional, Tuple
 from ..config import settings
@@ -26,25 +27,78 @@ class AnalysisService:
             print(f"Error parsing PGN: {e}")
             return None
     
-    def classify_move(self, cp_loss: float) -> str:
-        """Classify a move based on centipawn loss"""
+    def classify_move(self, cp_loss: float, eval_before: Optional[float] = None, eval_after: Optional[float] = None) -> str:
+        """
+        Classify a move based on centipawn loss AND position evaluation
+        
+        A blunder should be a move that turns a good position into a losing one,
+        not just any move with high centipawn loss.
+        """
         if cp_loss is None:
             return "book"
         
         abs_loss = abs(cp_loss)
         
+        # Perfect or near-perfect moves
         if abs_loss <= 10:
             return "best"
         elif abs_loss <= 25:
             return "excellent"
         elif abs_loss <= 50:
             return "good"
-        elif abs_loss <= 100:
-            return "inaccuracy"
-        elif abs_loss <= 200:
-            return "mistake"
-        else:
+        
+        # For mistakes and blunders, consider the position evaluation
+        # Convert centipawns to pawns for easier reasoning
+        eval_before_pawns = (eval_before / 100) if eval_before else 0
+        eval_after_pawns = (eval_after / 100) if eval_after else 0
+        
+        # A BLUNDER is a move that:
+        # 1. Turns a winning position (>+1.5) into a losing position (<-1.5) OR
+        # 2. Turns an equal position into a losing position (<-2.0) OR
+        # 3. Loses massive material/advantage (>300 CP) from any position
+        if eval_before is not None and eval_after is not None:
+            # Check if position went from winning to losing
+            if eval_before_pawns > 1.5 and eval_after_pawns < -1.5:
+                return "blunder"
+            
+            # Check if position went from equal/slightly better to clearly losing
+            if abs(eval_before_pawns) < 0.5 and eval_after_pawns < -2.0:
+                return "blunder"
+            
+            # Check if position went from slightly better to clearly losing
+            if 0.5 <= eval_before_pawns <= 1.5 and eval_after_pawns < -2.0:
+                return "blunder"
+        
+        # Massive centipawn loss is always a blunder (losing a piece without compensation)
+        if abs_loss >= 300:
             return "blunder"
+        
+        # A MISTAKE is a move that:
+        # 1. Significantly worsens the position (150-300 CP) OR
+        # 2. Turns advantage into equality or slight disadvantage
+        if eval_before is not None and eval_after is not None:
+            # Turn advantage into equality or worse
+            if eval_before_pawns > 2.0 and -0.5 <= eval_after_pawns <= 0.5:
+                return "mistake"
+            
+            # Turn winning into only slightly better
+            if eval_before_pawns > 2.5 and 0.5 < eval_after_pawns < 1.5:
+                return "mistake"
+        
+        # Moderate centipawn loss
+        if 150 <= abs_loss < 300:
+            return "mistake"
+        
+        # An INACCURACY is missing the best move but maintaining a solid position
+        if 50 < abs_loss < 150:
+            # If position is still good after the move, it's just an inaccuracy
+            if eval_after is not None and eval_after_pawns > -1.0:
+                return "inaccuracy"
+            # If position became clearly worse, it's a mistake
+            else:
+                return "mistake"
+        
+        return "good"
     
     def get_evaluation_cp(self, info: Dict) -> Optional[float]:
         """Extract centipawn evaluation from engine info"""
@@ -88,6 +142,8 @@ class AnalysisService:
         blunders = 0
         mistakes = 0
         inaccuracies = 0
+        coach_commentary_count = 0  # Limit coach commentaries to avoid long analysis times
+        max_coach_commentaries = 5  # Maximum 5 coach insights per game
         
         # Determine if we should analyze this move (only user's moves)
         is_user_white = user_color == "white"
@@ -156,6 +212,9 @@ class AnalysisService:
                 
                 # Calculate centipawn loss
                 cp_loss = None
+                eval_before_for_classification = eval_before
+                eval_after_for_classification = eval_after
+                
                 if eval_before is not None and eval_after is not None:
                     # Flip evaluation based on whose turn it was
                     if not is_white_move:
@@ -171,8 +230,13 @@ class AnalysisService:
                         total_cp_loss += max(0, cp_loss)  # Only count losses
                         num_analyzed_moves += 1
                 
-                # Classify the move
-                classification = self.classify_move(cp_loss)
+                # Classify the move using ORIGINAL evaluations (from current player's perspective)
+                # For black moves, we need to flip the evaluations for classification
+                if not is_white_move and eval_before_for_classification is not None:
+                    eval_before_for_classification = -eval_before_for_classification
+                    eval_after_for_classification = -eval_after_for_classification
+                
+                classification = self.classify_move(cp_loss, eval_before_for_classification, eval_after_for_classification)
                 
                 # Count errors (only for user's moves)
                 should_analyze = (is_white_move and is_user_white) or (not is_white_move and not is_user_white)
@@ -184,9 +248,10 @@ class AnalysisService:
                     elif classification == "inaccuracy":
                         inaccuracies += 1
                 
-                # Generate coach commentary for user's key moves
+                # Generate coach commentary for user's clear mistakes and blunders only
+                # Limit to max_coach_commentaries to prevent long analysis times
                 coach_commentary = None
-                if should_analyze and classification in ["blunder", "mistake", "inaccuracy"]:
+                if should_analyze and classification in ["blunder", "mistake"] and coach_commentary_count < max_coach_commentaries:
                     try:
                         # Determine game phase
                         phase = "opening" if half_move < 20 else ("endgame" if half_move > len(all_moves) * 0.7 else "middlegame")
@@ -202,17 +267,28 @@ class AnalysisService:
                         if best_move:
                             best_move_san = temp_board.san(best_move)
                         
-                        # Generate commentary
-                        coach_commentary = await self.coach_service.generate_move_commentary(
-                            move_san=move_san,
-                            classification=classification,
-                            centipawn_loss=cp_loss if cp_loss else 0,
-                            fen_before=fen_before,
-                            fen_after=board.fen(),
-                            best_move_san=best_move_san,
-                            game_phase=phase,
-                            user_color=user_color
-                        )
+                        # Generate commentary with timeout protection
+                        try:
+                            coach_commentary = await asyncio.wait_for(
+                                self.coach_service.generate_move_commentary(
+                                    move_san=move_san,
+                                    classification=classification,
+                                    centipawn_loss=cp_loss if cp_loss else 0,
+                                    fen_before=fen_before,
+                                    fen_after=board.fen(),
+                                    best_move_san=best_move_san,
+                                    game_phase=phase,
+                                    user_color=user_color
+                                ),
+                                timeout=25.0  # 25 second timeout for coach commentary
+                            )
+                        except asyncio.TimeoutError:
+                            print(f"Coach commentary generation timed out for move {move_san}. Continuing analysis without commentary.")
+                            coach_commentary = None
+                        
+                        # Increment counter if commentary was generated
+                        if coach_commentary:
+                            coach_commentary_count += 1
                     except Exception as e:
                         print(f"Error generating coach commentary: {e}")
                         coach_commentary = None

@@ -73,8 +73,8 @@ class CoachService:
         if not self.is_enabled():
             return None
         
-        # Only generate commentary for significant mistakes
-        if classification not in ["blunder", "mistake", "inaccuracy"]:
+        # Only generate commentary for clear mistakes and blunders (not inaccuracies)
+        if classification not in ["blunder", "mistake"]:
             return None
         
         try:
@@ -89,7 +89,7 @@ class CoachService:
                 user_color=user_color
             )
             
-            system_prompt = "You are an experienced chess coach providing constructive feedback. Be concise, educational, and encouraging. Focus on explaining why a move was problematic and what the player should have considered. Keep responses to 1-2 sentences."
+            system_prompt = "You are an experienced chess coach providing constructive feedback. Be concise, educational, and encouraging. Write in plain text without any markdown formatting, bold, or special characters. Keep responses to 2-3 clear sentences."
             
             # Generate commentary based on provider
             if self.provider == "openai":
@@ -136,10 +136,10 @@ class CoachService:
                     "stream": False,
                     "options": {
                         "temperature": 0.7,
-                        "num_predict": 150
+                        "num_predict": 100  # Reduced from 150 for faster responses
                     }
                 },
-                timeout=30
+                timeout=20  # Reduced from 30s to 20s
             )
             
             if response.status_code == 200:
@@ -149,6 +149,9 @@ class CoachService:
                 print(f"Ollama error: {response.status_code} - {response.text}")
                 return None
                 
+        except requests.exceptions.Timeout:
+            print("Ollama request timed out after 20 seconds. Skipping coach commentary for this move.")
+            return None
         except requests.exceptions.ConnectionError:
             print("Cannot connect to Ollama. Make sure it's running: ollama serve")
             return None
@@ -179,11 +182,9 @@ Centipawn loss: {centipawn_loss:.1f}
 Game phase: {game_phase}
 {best_move_text}
 
-Provide brief, educational coaching feedback (1-2 sentences) explaining:
-1. Why this move was a {classification}
-2. What the player should have considered instead
-
-Be constructive and focus on learning."""
+Provide brief, educational coaching feedback in plain text (no markdown, no bold, no formatting).
+Write 2-3 clear sentences explaining why this was a {classification} and what would have been better.
+Be constructive, specific, and focus on the key chess principles violated."""
         
         return prompt
     
