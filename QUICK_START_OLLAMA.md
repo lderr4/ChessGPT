@@ -199,3 +199,5 @@ curl http://localhost:11434/api/tags
 **Ready to analyze chess games with FREE AI coaching? Let's go! 🎓♟️🚀**
 
 
+
+
