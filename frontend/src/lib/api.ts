@@ -91,6 +91,7 @@ export const gamesAPI = {
     time_class?: string;
     result?: string;
     opening_eco?: string;
+    analysis_state?: string;
   }) => api.get("/games/", { params }),
 
   getGame: (gameId: number) => api.get(`/games/${gameId}`),

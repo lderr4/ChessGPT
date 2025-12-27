@@ -124,6 +124,14 @@ class AnalysisService:
         """
         Analyze a complete game and return move-by-move analysis
         
+        Performance optimizations:
+        - Single analysis per position (best move extracted from PV, no redundant analysis)
+        - Efficient board state management (copy/pop instead of rebuilding)
+        - Coach commentary limited to 5 per game with timeout protection
+        
+        For a 40-move game: ~80 engine analyses (before + after per move)
+        Previously: ~120 analyses (before + best + after per move) = 33% faster!
+        
         Returns:
             Dict with keys:
                 - moves: List of move analysis
@@ -175,25 +183,20 @@ class AnalysisService:
                 is_white_move = move_info['is_white']
                 move_san = move_info['san']
                 
-                # Get evaluation before the move
+                # OPTIMIZATION: Single analysis before move gives us both eval and best move
+                # The PV (principal variation) contains the best move sequence
                 try:
                     info_before = await engine.analyse(
                         board,
                         chess.engine.Limit(depth=self.depth, time=self.time_limit)
                     )
                     eval_before = self.get_evaluation_cp(info_before)
+                    # Best move is the first move in the PV - no need for second analysis!
+                    pv = info_before.get("pv", [])
+                    best_move = pv[0] if pv else None
                 except Exception as e:
                     print(f"Error evaluating position: {e}")
                     eval_before = None
-                
-                # Get best move
-                try:
-                    info_best = await engine.analyse(
-                        board,
-                        chess.engine.Limit(depth=self.depth, time=self.time_limit)
-                    )
-                    best_move = info_best.get("pv", [None])[0]
-                except:
                     best_move = None
                 
                 # Make the move
@@ -256,10 +259,10 @@ class AnalysisService:
                         # Determine game phase
                         phase = "opening" if half_move < 20 else ("endgame" if half_move > len(all_moves) * 0.7 else "middlegame")
                         
-                        # Get FEN before the move (we need to rewind one move)
-                        temp_board = chess.Board()
-                        for i in range(half_move):
-                            temp_board.push(all_moves[i]['move'])
+                        # OPTIMIZATION: Use board.copy() and pop() instead of rebuilding from scratch
+                        # This is much faster than rebuilding the entire game
+                        temp_board = board.copy()
+                        temp_board.pop()  # Undo the last move to get position before
                         fen_before = temp_board.fen()
                         
                         # Get best move in SAN

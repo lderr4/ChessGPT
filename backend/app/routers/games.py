@@ -125,12 +125,32 @@ def import_games_background(
         db.rollback()
 
 
-async def analyze_game_background(game_id: int, db: Session):
+async def analyze_game_background(game_id: int):
     """Background task to analyze a single game"""
+    # Create a new database session for the background task
+    from ..database import SessionLocal
+    db = SessionLocal()
     try:
         game = db.query(Game).filter(Game.id == game_id).first()
-        if not game or game.is_analyzed:
+        if not game:
+            print(f"ERROR: Game {game_id} not found in background task")
             return
+        
+        print(f"Background task: Game {game_id} current analysis_state is '{game.analysis_state}'")
+        
+        if game.analysis_state == "analyzed":
+            print(f"Game {game_id} already analyzed, skipping")
+            return
+        
+        # Ensure state is in_progress (in case it wasn't set)
+        if game.analysis_state != "in_progress":
+            print(f"WARNING: Game {game_id} state is '{game.analysis_state}', setting to 'in_progress'")
+            game.analysis_state = "in_progress"
+            db.commit()
+            db.refresh(game)
+            print(f"✓ Game {game_id} analysis_state set to 'in_progress' in background task")
+        else:
+            print(f"✓ Game {game_id} already has analysis_state 'in_progress'")
         
         # Analyze the game
         analysis_service = AnalysisService()
@@ -141,6 +161,7 @@ async def analyze_game_background(game_id: int, db: Session):
             print(f"Error analyzing game {game_id}: {error_msg}")
             # Mark as analyzed with 0 stats so we don't retry
             game.is_analyzed = True
+            game.analysis_state = "analyzed"
             game.num_moves = 0
             game.analyzed_at = datetime.utcnow()
             db.commit()
@@ -149,6 +170,7 @@ async def analyze_game_background(game_id: int, db: Session):
         # Update game with analysis results
         stats = result.get("stats", {})
         game.is_analyzed = True
+        game.analysis_state = "analyzed"
         game.num_moves = stats.get("num_moves", 0)
         game.average_centipawn_loss = stats.get("average_centipawn_loss")
         game.accuracy = stats.get("accuracy")
@@ -166,23 +188,32 @@ async def analyze_game_background(game_id: int, db: Session):
             db.add(move)
         
         db.commit()
+        db.refresh(game)
+        print(f"Game {game_id} analysis completed, state set to 'analyzed'")
         
         # Update user stats after analysis
         StatsService.calculate_user_stats(db, game.user_id)
         
     except Exception as e:
         print(f"Error analyzing game {game_id}: {e}")
+        import traceback
+        traceback.print_exc()
         # Mark as analyzed to prevent infinite retries
         try:
             game = db.query(Game).filter(Game.id == game_id).first()
-            if game and not game.is_analyzed:
+            if game and game.analysis_state != "analyzed":
                 game.is_analyzed = True
+                game.analysis_state = "analyzed"
                 game.num_moves = 0
                 game.analyzed_at = datetime.utcnow()
                 db.commit()
-        except:
-            pass
+                db.refresh(game)
+                print(f"Game {game_id} marked as analyzed due to error")
+        except Exception as e2:
+            print(f"Error marking game {game_id} as analyzed: {e2}")
         db.rollback()
+    finally:
+        db.close()
 
 
 @router.post("/import", status_code=202)
@@ -286,6 +317,7 @@ def get_games(
     time_class: Optional[str] = None,
     result: Optional[str] = None,
     opening_eco: Optional[str] = None,
+    analysis_state: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -300,6 +332,8 @@ def get_games(
         query = query.filter(Game.result == result)
     if opening_eco:
         query = query.filter(Game.opening_eco == opening_eco)
+    if analysis_state:
+        query = query.filter(Game.analysis_state == analysis_state)
     
     # Order by most recent first
     query = query.order_by(Game.date_played.desc())
@@ -344,6 +378,7 @@ def get_game(
         "opening_eco": game.opening_eco,
         "opening_name": game.opening_name,
         "is_analyzed": game.is_analyzed,
+        "analysis_state": game.analysis_state,
         "accuracy": game.accuracy,
         "num_blunders": game.num_blunders,
         "num_mistakes": game.num_mistakes,
@@ -374,18 +409,32 @@ async def analyze_game(
     if not game:
         raise HTTPException(status_code=404, detail="Game not found")
     
-    if game.is_analyzed and not force:
+    if game.analysis_state == "analyzed" and not force:
         return {"message": "Game already analyzed", "status": "completed"}
     
     # If forcing re-analysis, delete existing moves and reset analysis flag
-    if force and game.is_analyzed:
+    if force and game.analysis_state == "analyzed":
         db.query(Move).filter(Move.game_id == game_id).delete()
         game.is_analyzed = False
+        game.analysis_state = "unanalyzed"
         game.analyzed_at = None
         db.commit()
     
-    # Start background analysis
-    background_tasks.add_task(analyze_game_background, game_id, db)
+    # Set analysis state to in_progress
+    game.analysis_state = "in_progress"
+    db.commit()
+    db.refresh(game)  # Refresh to ensure the state is persisted
+    
+    # Verify the state was saved
+    db.refresh(game)
+    if game.analysis_state != "in_progress":
+        print(f"ERROR: Game {game_id} analysis_state is '{game.analysis_state}' after setting to 'in_progress'")
+    else:
+        print(f"✓ Game {game_id} analysis_state successfully set to 'in_progress'")
+    
+    # Start background analysis (pass game_id only, not db session)
+    # The background task will create its own session
+    background_tasks.add_task(analyze_game_background, game_id)
     
     return {
         "message": "Game analysis started" if not force else "Game re-analysis started",
@@ -425,7 +474,7 @@ async def analyze_all_games_background(user_id: int, job_id: int, db: Session):
         # Get all unanalyzed games for this user
         games = db.query(Game).filter(
             Game.user_id == user_id,
-            Game.is_analyzed == False
+            Game.analysis_state != "analyzed"
         ).all()
         
         job.total_games = len(games)
@@ -442,12 +491,17 @@ async def analyze_all_games_background(user_id: int, job_id: int, db: Session):
         analysis_service = AnalysisService()
         for i, game in enumerate(games):
             try:
+                # Set state to in_progress
+                game.analysis_state = "in_progress"
+                db.commit()
+                
                 result = await analysis_service.analyze_game(game.pgn, game.user_color)
                 
                 if "error" not in result:
                     # Update game with analysis results
                     stats = result.get("stats", {})
                     game.is_analyzed = True
+                    game.analysis_state = "analyzed"
                     game.num_moves = stats.get("num_moves", 0)
                     game.average_centipawn_loss = stats.get("average_centipawn_loss")
                     game.accuracy = stats.get("accuracy")
@@ -468,6 +522,7 @@ async def analyze_all_games_background(user_id: int, job_id: int, db: Session):
                 else:
                     # Mark as analyzed even if error to prevent retry
                     game.is_analyzed = True
+                    game.analysis_state = "analyzed"
                     game.analyzed_at = datetime.utcnow()
                 
                 # Update progress
@@ -478,6 +533,7 @@ async def analyze_all_games_background(user_id: int, job_id: int, db: Session):
                 print(f"Error analyzing game {game.id}: {e}")
                 # Mark as analyzed to prevent infinite retries
                 game.is_analyzed = True
+                game.analysis_state = "analyzed"
                 game.analyzed_at = datetime.utcnow()
                 db.commit()
         

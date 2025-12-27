@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { gamesAPI } from "../lib/api";
 import { ChevronLeft, ChevronRight, Filter, Zap, Loader2 } from "lucide-react";
@@ -13,6 +13,7 @@ interface Game {
   opening_eco: string;
   opening_name: string;
   is_analyzed: boolean;
+  analysis_state: "unanalyzed" | "in_progress" | "analyzed";
   accuracy: number | null;
   num_blunders: number;
   num_mistakes: number;
@@ -35,12 +36,16 @@ const Games = () => {
   const [showBatchAnalysisModal, setShowBatchAnalysisModal] = useState(false);
   const [batchAnalysisJob, setBatchAnalysisJob] = useState<any>(null);
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false);
+  const pollIntervalsRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
+  const fetchGamesRef = useRef<() => Promise<void>>();
+  const analyzingGameIdsRef = useRef<Set<number>>(new Set());
 
   const GAMES_PER_PAGE = 20;
 
+  // Keep ref in sync with state
   useEffect(() => {
-    fetchGames();
-  }, [page, filters]);
+    analyzingGameIdsRef.current = analyzingGameIds;
+  }, [analyzingGameIds]);
 
   const fetchGames = async () => {
     setIsLoading(true);
@@ -55,13 +60,230 @@ const Games = () => {
       if (filters.opening_eco) params.opening_eco = filters.opening_eco;
 
       const response = await gamesAPI.getGames(params);
-      setGames(response.data);
+
+      // Update games: if a game is in analyzingGameIds, ensure it shows as in_progress
+      const currentAnalyzingIds = analyzingGameIdsRef.current;
+      const updatedGames = response.data.map((game: Game) => {
+        if (
+          currentAnalyzingIds.has(game.id) &&
+          game.analysis_state !== "in_progress"
+        ) {
+          // Game is being analyzed but API hasn't updated yet - treat as in_progress
+          console.log(
+            `Game ${game.id} is in analyzingGameIds, forcing in_progress state`
+          );
+          return { ...game, analysis_state: "in_progress" as const };
+        }
+        return game;
+      });
+
+      setGames(updatedGames);
+
+      // Update analyzingGameIds based on games with analysis_state === "in_progress"
+      const inProgressGames = updatedGames
+        .filter((game: Game) => game.analysis_state === "in_progress")
+        .map((game: Game) => game.id);
+
+      if (inProgressGames.length > 0) {
+        console.log(
+          `Found ${inProgressGames.length} in-progress games on current page:`,
+          inProgressGames
+        );
+      }
+
+      setAnalyzingGameIds((prev) => {
+        const newSet = new Set(prev);
+        // Add games that are in progress
+        inProgressGames.forEach((id) => newSet.add(id));
+        // Don't remove games that are not on current page - they might still be in progress
+        // Only remove if we explicitly see they're not in progress
+        updatedGames.forEach((game: Game) => {
+          if (
+            game.analysis_state === "analyzed" ||
+            game.analysis_state === "unanalyzed"
+          ) {
+            newSet.delete(game.id);
+          }
+        });
+        return newSet;
+      });
+
+      // Start polling for any new in-progress games
+      inProgressGames.forEach((gameId: number) => {
+        if (!pollIntervalsRef.current.has(gameId)) {
+          startPollingForGame(gameId);
+        }
+      });
     } catch (error) {
       console.error("Failed to fetch games:", error);
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Store fetchGames in ref so it's always current
+  fetchGamesRef.current = fetchGames;
+
+  // Fetch in-progress games first, then fetch regular games
+  useEffect(() => {
+    const loadGames = async () => {
+      // First, fetch in-progress games to populate analyzingGameIds
+      let inProgressGameIds: number[] = [];
+      try {
+        console.log("Fetching in-progress games...");
+        const inProgressResponse = await gamesAPI.getGames({
+          skip: 0,
+          limit: 1000,
+          analysis_state: "in_progress",
+        });
+
+        console.log("In-progress games API response:", inProgressResponse.data);
+        inProgressGameIds = inProgressResponse.data.map(
+          (game: Game) => game.id
+        );
+
+        console.log(
+          `Extracted ${inProgressGameIds.length} in-progress game IDs:`,
+          inProgressGameIds
+        );
+
+        if (inProgressGameIds.length > 0) {
+          console.log(
+            `Found ${inProgressGameIds.length} in-progress games:`,
+            inProgressGameIds
+          );
+          const inProgressSet = new Set(inProgressGameIds);
+          setAnalyzingGameIds(inProgressSet);
+          analyzingGameIdsRef.current = inProgressSet; // Update ref immediately
+          console.log(
+            "Updated analyzingGameIds state and ref:",
+            Array.from(inProgressSet)
+          );
+
+          // Start polling for in-progress games
+          inProgressGameIds.forEach((gameId: number) => {
+            if (!pollIntervalsRef.current.has(gameId)) {
+              console.log(`Starting to poll for game ${gameId}`);
+              startPollingForGame(gameId);
+            }
+          });
+        } else {
+          console.log("No in-progress games found in API response");
+        }
+      } catch (error) {
+        console.error("Failed to fetch in-progress games:", error);
+      }
+
+      // Then fetch regular games, passing the in-progress IDs so we can update game states
+      setIsLoading(true);
+      try {
+        const params: any = {
+          skip: page * GAMES_PER_PAGE,
+          limit: GAMES_PER_PAGE,
+        };
+
+        if (filters.time_class) params.time_class = filters.time_class;
+        if (filters.result) params.result = filters.result;
+        if (filters.opening_eco) params.opening_eco = filters.opening_eco;
+
+        const response = await gamesAPI.getGames(params);
+        console.log(
+          "Fetched games for current page:",
+          response.data.map((g: Game) => ({
+            id: g.id,
+            analysis_state: g.analysis_state,
+          }))
+        );
+
+        // Update games: if a game is in inProgressGameIds, ensure it shows as in_progress
+        const inProgressSet = new Set(inProgressGameIds);
+        const updatedGames = response.data.map((game: Game) => {
+          if (
+            inProgressSet.has(game.id) &&
+            game.analysis_state !== "in_progress"
+          ) {
+            // Game is being analyzed but API hasn't updated yet - treat as in_progress
+            console.log(
+              `Game ${game.id} is in in-progress list (state: ${game.analysis_state}), forcing in_progress state`
+            );
+            return { ...game, analysis_state: "in_progress" as const };
+          }
+          // Also check if game is in analyzingGameIds (from state)
+          if (
+            analyzingGameIdsRef.current.has(game.id) &&
+            game.analysis_state !== "in_progress"
+          ) {
+            console.log(
+              `Game ${game.id} is in analyzingGameIds ref (state: ${game.analysis_state}), forcing in_progress state`
+            );
+            return { ...game, analysis_state: "in_progress" as const };
+          }
+          return game;
+        });
+        console.log(
+          "Updated games array:",
+          updatedGames.map((g: Game) => ({
+            id: g.id,
+            analysis_state: g.analysis_state,
+          }))
+        );
+
+        setGames(updatedGames);
+        console.log("Set games array with updated analysis states");
+
+        // Update analyzingGameIds based on games with analysis_state === "in_progress"
+        const inProgressGames = updatedGames
+          .filter((game: Game) => game.analysis_state === "in_progress")
+          .map((game: Game) => game.id);
+
+        if (inProgressGames.length > 0) {
+          console.log(
+            `Found ${inProgressGames.length} in-progress games on current page:`,
+            inProgressGames
+          );
+        }
+
+        setAnalyzingGameIds((prev) => {
+          const newSet = new Set(prev);
+          // Add games that are in progress
+          inProgressGames.forEach((id) => newSet.add(id));
+          // Don't remove games that are not on current page - they might still be in progress
+          // Only remove if we explicitly see they're not in progress
+          updatedGames.forEach((game: Game) => {
+            if (
+              game.analysis_state === "analyzed" ||
+              game.analysis_state === "unanalyzed"
+            ) {
+              newSet.delete(game.id);
+            }
+          });
+          analyzingGameIdsRef.current = newSet; // Update ref
+          console.log("Updated analyzingGameIds:", Array.from(newSet));
+          return newSet;
+        });
+
+        // Start polling for any new in-progress games
+        inProgressGames.forEach((gameId: number) => {
+          if (!pollIntervalsRef.current.has(gameId)) {
+            startPollingForGame(gameId);
+          }
+        });
+      } catch (error) {
+        console.error("Failed to fetch games:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadGames();
+  }, [page, filters]);
+
+  // Cleanup intervals on unmount
+  useEffect(() => {
+    return () => {
+      pollIntervalsRef.current.forEach((interval) => clearInterval(interval));
+    };
+  }, []);
 
   const handleFilterChange = (key: string, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -73,52 +295,129 @@ const Games = () => {
     setPage(0);
   };
 
-  const handleAnalyzeGame = async (gameId: number) => {
-    // Add to analyzing set
-    setAnalyzingGameIds((prev) => new Set(prev).add(gameId));
+  const startPollingForGame = (gameId: number) => {
+    // Don't start polling if already polling for this game
+    if (pollIntervalsRef.current.has(gameId)) {
+      console.log(`Already polling for game ${gameId}`);
+      return;
+    }
 
-    try {
-      await gamesAPI.analyzeGame(gameId);
+    console.log(`Starting to poll for game ${gameId}`);
+    let attempts = 0;
+    const maxAttempts = 60; // 2 minutes max (60 * 2 seconds)
 
-      // Poll for completion (analysis takes 30-60 seconds)
-      let attempts = 0;
-      const maxAttempts = 60; // 2 minutes max (60 * 2 seconds)
-
-      const checkStatus = setInterval(async () => {
-        attempts++;
-        try {
-          const response = await gamesAPI.getGame(gameId);
-          if (response.data.is_analyzed) {
-            clearInterval(checkStatus);
-            setAnalyzingGameIds((prev) => {
-              const newSet = new Set(prev);
-              newSet.delete(gameId);
-              return newSet;
-            });
-            // Refresh the games list
-            fetchGames();
-          } else if (attempts >= maxAttempts) {
-            // Timeout - stop polling
-            clearInterval(checkStatus);
-            setAnalyzingGameIds((prev) => {
-              const newSet = new Set(prev);
-              newSet.delete(gameId);
-              return newSet;
-            });
-            alert(
-              `Analysis timeout for game ${gameId}. It may still be processing. Try refreshing in a minute.`
-            );
-          }
-        } catch (error) {
-          console.error("Error checking analysis status:", error);
+    const checkStatus = setInterval(async () => {
+      attempts++;
+      try {
+        const response = await gamesAPI.getGame(gameId);
+        if (response.data.analysis_state === "analyzed") {
+          // Analysis complete
+          console.log(`Game ${gameId} analysis complete`);
           clearInterval(checkStatus);
+          pollIntervalsRef.current.delete(gameId);
           setAnalyzingGameIds((prev) => {
             const newSet = new Set(prev);
             newSet.delete(gameId);
             return newSet;
           });
+          // Refresh the games list
+          if (fetchGamesRef.current) {
+            fetchGamesRef.current();
+          }
+        } else if (response.data.analysis_state !== "in_progress") {
+          // Game is no longer in progress (might have been reset or error)
+          console.log(`Game ${gameId} is no longer in progress`);
+          clearInterval(checkStatus);
+          pollIntervalsRef.current.delete(gameId);
+          setAnalyzingGameIds((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(gameId);
+            return newSet;
+          });
+        } else if (attempts >= maxAttempts) {
+          // Timeout - stop polling
+          console.log(`Game ${gameId} polling timeout`);
+          clearInterval(checkStatus);
+          pollIntervalsRef.current.delete(gameId);
+          setAnalyzingGameIds((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(gameId);
+            return newSet;
+          });
+          alert(
+            `Analysis timeout for game ${gameId}. It may still be processing. Try refreshing in a minute.`
+          );
         }
-      }, 2000); // Check every 2 seconds
+      } catch (error) {
+        console.error(
+          `Error checking analysis status for game ${gameId}:`,
+          error
+        );
+        clearInterval(checkStatus);
+        pollIntervalsRef.current.delete(gameId);
+        setAnalyzingGameIds((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(gameId);
+          return newSet;
+        });
+      }
+    }, 2000); // Check every 2 seconds
+
+    // Store the interval ID
+    pollIntervalsRef.current.set(gameId, checkStatus);
+  };
+
+  // Update games array when analyzingGameIds changes to ensure UI reflects current state
+  useEffect(() => {
+    setGames((currentGames) => {
+      if (currentGames.length === 0 || analyzingGameIds.size === 0) {
+        return currentGames;
+      }
+
+      const updatedGames = currentGames.map((game: Game) => {
+        // If game is in analyzingGameIds but doesn't show as in_progress, update it
+        if (
+          analyzingGameIds.has(game.id) &&
+          game.analysis_state !== "in_progress"
+        ) {
+          console.log(
+            `Updating game ${game.id} to in_progress based on analyzingGameIds`
+          );
+          return { ...game, analysis_state: "in_progress" as const };
+        }
+        return game;
+      });
+
+      // Only update if something changed
+      const hasChanges = updatedGames.some(
+        (game: Game, index: number) =>
+          game.analysis_state !== currentGames[index].analysis_state
+      );
+
+      if (hasChanges) {
+        console.log("Updating games array due to analyzingGameIds change");
+        return updatedGames;
+      }
+
+      return currentGames;
+    });
+  }, [analyzingGameIds]); // Only re-run when analyzingGameIds changes
+
+  const handleAnalyzeGame = async (gameId: number) => {
+    console.log(`Starting analysis for game ${gameId}`);
+    // Add to analyzing set
+    setAnalyzingGameIds((prev) => {
+      const newSet = new Set(prev).add(gameId);
+      return newSet;
+    });
+
+    try {
+      await gamesAPI.analyzeGame(gameId);
+      console.log(`Analysis started for game ${gameId}, beginning polling`);
+      // Start polling for completion
+      startPollingForGame(gameId);
+      // Refresh games list to get updated analysis_state
+      fetchGames();
     } catch (error) {
       console.error("Failed to analyze game:", error);
       alert("Failed to start analysis. Please try again.");
@@ -430,18 +729,22 @@ const Games = () => {
                       </span>
                     </td>
                     <td className="py-4 px-6 text-center">
-                      {game.is_analyzed && game.accuracy !== null ? (
+                      {game.analysis_state === "analyzed" &&
+                      game.accuracy !== null ? (
                         <span className="font-medium text-gray-900">
                           {game.accuracy.toFixed(1)}%
                         </span>
                       ) : (
                         <span className="text-gray-400 text-sm">
-                          Not analyzed
+                          {game.analysis_state === "in_progress" ||
+                          analyzingGameIds.has(game.id)
+                            ? "Analyzing..."
+                            : "Not analyzed"}
                         </span>
                       )}
                     </td>
                     <td className="py-4 px-6 text-center">
-                      {game.is_analyzed ? (
+                      {game.analysis_state === "analyzed" ? (
                         <div className="text-sm text-gray-600">
                           {game.num_blunders > 0 && (
                             <span className="text-red-600">
@@ -472,29 +775,28 @@ const Games = () => {
                       {new Date(game.date_played).toLocaleDateString()}
                     </td>
                     <td className="py-4 px-6 text-center">
-                      {!game.is_analyzed ? (
-                        analyzingGameIds.has(game.id) ? (
-                          <div className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-blue-600 bg-blue-50 rounded">
-                            <Loader2 size={14} className="animate-spin" />
-                            Analyzing...
-                          </div>
-                        ) : (
-                          <button
-                            onClick={(e) => {
-                              e.preventDefault();
-                              handleAnalyzeGame(game.id);
-                            }}
-                            className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-primary-600 bg-primary-50 rounded hover:bg-primary-100 transition"
-                            title="Analyze with Stockfish (~30-60 seconds)"
-                          >
-                            <Zap size={14} />
-                            Analyze
-                          </button>
-                        )
-                      ) : (
+                      {game.analysis_state === "in_progress" ||
+                      analyzingGameIds.has(game.id) ? (
+                        <div className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-blue-600 bg-blue-50 rounded">
+                          <Loader2 size={14} className="animate-spin" />
+                          Analyzing...
+                        </div>
+                      ) : game.analysis_state === "analyzed" ? (
                         <span className="text-xs text-green-600 font-medium">
                           ✓ Analyzed
                         </span>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            handleAnalyzeGame(game.id);
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-primary-600 bg-primary-50 rounded hover:bg-primary-100 transition"
+                          title="Analyze with Stockfish (~30-60 seconds)"
+                        >
+                          <Zap size={14} />
+                          Analyze
+                        </button>
                       )}
                     </td>
                   </tr>

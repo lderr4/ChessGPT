@@ -57,7 +57,8 @@ class Game(Base):
     opening_ply = Column(Integer, nullable=True)  # How many moves into opening
     
     # Analysis
-    is_analyzed = Column(Boolean, default=False)
+    is_analyzed = Column(Boolean, default=False)  # Deprecated, use analysis_state instead
+    analysis_state = Column(String, default="unanalyzed", nullable=False)  # 'unanalyzed', 'in_progress', 'analyzed'
     average_centipawn_loss = Column(Float, nullable=True)
     accuracy = Column(Float, nullable=True)
     num_moves = Column(Integer, nullable=True)

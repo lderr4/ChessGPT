@@ -85,7 +85,8 @@ class GameResponse(GameBase):
     time_class: Optional[str]
     opening_eco: Optional[str]
     opening_name: Optional[str]
-    is_analyzed: bool
+    is_analyzed: bool  # Deprecated, use analysis_state instead
+    analysis_state: str  # 'unanalyzed', 'in_progress', or 'analyzed'
     accuracy: Optional[float]
     num_blunders: int
     num_mistakes: int
