@@ -53,3 +53,4 @@ dist/
 htmlcov/
 .pytest_cache/
 
+notes.txt
