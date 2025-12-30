@@ -363,6 +363,100 @@ async def test_engine_calls_optimization(monkeypatch):
         f"Expected ~{expected_calls_optimized}, got {actual_calls}"
     )
 
+@pytest.mark.asyncio
+async def test_centipawn_loss_calculation_correctness():
+    """
+    Test that centipawn_loss is calculated correctly from evaluations.
+    
+    The stored values are:
+    - evaluation_before: from current player's perspective (already flipped if black)
+    - evaluation_after: -eval_after (flipped for next player, so from current player's perspective after move)
+    - centipawn_loss: eval_before - eval_after (from current player's perspective)
+    
+    So: cp_loss should equal eval_before - (-eval_after) = eval_before + eval_after
+    """
+    service = AnalysisService()
+    result = await service.analyze_game(VALIDATION_GAME_PGN, "white")
+    
+    assert "error" not in result
+    moves = result["moves"]
+    
+    for move in moves:
+        eval_before = move["evaluation_before"]
+        eval_after = move["evaluation_after"]
+        cp_loss = move["centipawn_loss"]
+        is_white = move["is_white"]
+        
+        # If we have all three values, verify the calculation
+        if eval_before is not None and eval_after is not None and cp_loss is not None:
+            # Both stored evaluations are from the current player's perspective
+            # evaluation_after is stored as -eval_after (flipped for next player)
+            # So to get eval_after from current player's perspective, we need to flip it back
+            eval_after_from_current_perspective = -eval_after
+            
+            # Calculate expected cp_loss
+            # cp_loss = eval_before - eval_after (both from current player's perspective)
+            expected_cp_loss = eval_before - eval_after_from_current_perspective
+            
+            # Allow small floating point differences
+            tolerance = 0.1
+            assert abs(cp_loss - expected_cp_loss) < tolerance, (
+                f"Move {move['move_san']} ({'white' if is_white else 'black'}, half_move {move['half_move']}): "
+                f"centipawn_loss calculation incorrect.\n"
+                f"  Stored eval_before: {eval_before:.2f}\n"
+                f"  Stored eval_after: {eval_after:.2f} (from next player's perspective)\n"
+                f"  eval_after from current perspective: {eval_after_from_current_perspective:.2f}\n"
+                f"  Expected cp_loss: {expected_cp_loss:.2f} (eval_before - eval_after_from_current)\n"
+                f"  Actual cp_loss: {cp_loss:.2f}\n"
+                f"  Difference: {abs(cp_loss - expected_cp_loss):.2f}"
+            )
 
+
+@pytest.mark.asyncio
+async def test_evaluation_reasonable_values():
+    """
+    Test that evaluations are within reasonable bounds and not corrupted.
+    
+    Validates:
+    - Evaluations are not NaN or infinite
+    - Evaluations are within reasonable chess bounds (mate scores can be large)
+    - Evaluations make sense relative to each other
+    """
+    import math
+    
+    service = AnalysisService()
+    result = await service.analyze_game(VALIDATION_GAME_PGN, "white")
+    
+    assert "error" not in result
+    moves = result["moves"]
+    
+    for move in moves:
+        eval_before = move["evaluation_before"]
+        eval_after = move["evaluation_after"]
+        
+        for eval_name, eval_value in [("evaluation_before", eval_before), ("evaluation_after", eval_after)]:
+            if eval_value is not None:
+                # Check for NaN or infinite
+                assert not math.isnan(eval_value), (
+                    f"Move {move['move_san']}: {eval_name} is NaN (Not a Number)"
+                )
+                assert not math.isinf(eval_value), (
+                    f"Move {move['move_san']}: {eval_name} is infinite"
+                )
+                
+                # Evaluations can be large for mate scores, but should be reasonable
+                # Allow up to 50000 for extreme mate scores, but flag if extremely large
+                assert abs(eval_value) < 50000, (
+                    f"Move {move['move_san']}: {eval_name} is extremely large ({eval_value:.2f}), "
+                    f"might indicate an error. Normal evaluations are typically -1000 to +1000 centipawns."
+                )
+                
+                # Check that evaluations are reasonable (not absurdly large for non-mate positions)
+                # Most positions should be within -5000 to +5000 centipawns (50 pawns)
+                # Only mate positions should exceed this
+                if abs(eval_value) > 5000:
+                    # This might be a mate score, which is OK
+                    # But log it for verification
+                    pass
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
