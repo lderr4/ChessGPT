@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     
     # Stockfish
     STOCKFISH_PATH: str = "/usr/games/stockfish"
-    STOCKFISH_DEPTH: int = 20
-    STOCKFISH_TIME_LIMIT: float = 1.0
+    STOCKFISH_DEPTH: int = 18
+    STOCKFISH_TIME_LIMIT: float = 0.8
     
     # AI Chess Coach
     ENABLE_COACH: bool = False

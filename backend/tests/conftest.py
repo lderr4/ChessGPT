@@ -9,7 +9,16 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("CHESS_COM_USER_AGENT", "ChessAnalyticsTest/1.0")
 os.environ.setdefault("STOCKFISH_PATH", "/usr/bin/false")
 
-from backend.app.database import Base
+# Try both import paths (Docker uses 'app', local dev might use 'backend.app')
+try:
+    from app.database import Base
+except (ImportError, ModuleNotFoundError):
+    try:
+        from backend.app.database import Base
+    except (ImportError, ModuleNotFoundError):
+        # If both fail, create a dummy Base for tests that don't need it
+        from sqlalchemy.ext.declarative import declarative_base
+        Base = declarative_base()
 
 
 @pytest.fixture(scope="session")

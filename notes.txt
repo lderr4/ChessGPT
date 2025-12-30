@@ -38,3 +38,185 @@ Endgame:
 	Then I activated my queen. I had the opportunity to check his king and create a bit of an advantage. I should have calculated this further.
 
 	Completely winning. Then make one fatal error and lose. I saw that he was way ahead on time and started panicking a bit
+
+
+Goal: make analysis significantly faster
+run 1:
+============================================================
+Testing SHORT GAME (20 moves)
+============================================================
+⏱️  Total time: 29.66 seconds
+📊 Moves analyzed: 20
+⚡ Time per move: 1.483 seconds
+✅ Success: True
+
+============================================================
+Testing MEDIUM GAME (85 moves)
+============================================================
+============================================================
+✅ Success: True
+🔍 Expected engine calls: ~170 (2 per move)
+PASSED
+tests/test_analysis_service_performance.py::test_analyze_game_long_performance Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+
+============================================================
+Testing LONG GAME (120 moves)
+============================================================
+⏱️  Total time: 127.79 seconds
+📊 Moves analyzed: 120
+⚡ Time per move: 1.065 seconds
+✅ Success: True
+PASSED
+tests/test_analysis_service_performance.py::test_classify_move_performance Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+
+============================================================
+Testing classify_move performance
+============================================================
+⏱️  Total time: 0.0014 seconds
+📊 Total calls: 5000
+⚡ Time per call: 0.29 microseconds
+✅ Performance: EXCELLENT
+PASSED
+tests/test_analysis_service_performance.py::test_parse_pgn_performance Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+
+============================================================
+Testing parse_pgn performance
+============================================================
+⏱️  Total time: 1.9320 seconds
+📊 Total calls: 1000
+⚡ Time per call: 1.932 milliseconds
+✅ Performance: GOOD
+PASSED
+tests/test_analysis_service_performance.py::test_analyze_position_performance Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+
+============================================================
+Testing analyze_position performance
+============================================================
+⏱️  Total time: 1.30 seconds
+✅ Success: True
+📊 Evaluation: 39.0
+🎯 Best move: e4
+PASSED
+tests/test_analysis_service_performance.py::test_analyze_game_breakdown Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+
+============================================================
+Performance Breakdown Analysis
+============================================================
+📝 Parse PGN: 0.0015s
+📋 Build move list: 0.0006s
+🔍 Full analysis: 29.94s
+📊 Moves: 20
+
+💡 Breakdown:
+   - Setup overhead: 0.0021s (0.0%)
+   - Engine analysis: 29.94s (100.0%)
+PASSED
+
+
+run 2:
+============================================================
+Testing SHORT GAME (20 moves)
+============================================================
+⏱️  Total time: 16.19 seconds
+📊 Moves analyzed: 20
+⚡ Time per move: 0.810 seconds
+✅ Success: True
+PASSED
+tests/test_analysis_service_performance.py::test_analyze_game_medium_performance Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+============================================================
+Testing SHORT GAME (20 moves)
+============================================================
+⏱️  Total time: 16.19 seconds
+📊 Moves analyzed: 20
+⚡ Time per move: 0.810 seconds
+✅ Success: True
+PASSED
+tests/test_analysis_service_performance.py::test_analyze_game_medium_performance Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+✅ Success: True
+PASSED
+tests/test_analysis_service_performance.py::test_analyze_game_medium_performance Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+h model: llama3.1 at http://host.docker.internal:11434
+Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+
+============================================================
+Testing MEDIUM GAME (85 moves)
+============================================================
+⏱️  Total time: 66.11 seconds
+📊 Moves analyzed: 85
+⚡ Time per move: 0.778 seconds
+✅ Success: True
+🔍 Expected engine calls: ~170 (2 per move)
+PASSED
+tests/test_analysis_service_performance.py::test_analyze_game_long_performance Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+
+============================================================
+Testing LONG GAME (120 moves)
+============================================================
+⏱️  Total time: 79.83 seconds
+📊 Moves analyzed: 120
+⚡ Time per move: 0.665 seconds
+✅ Success: True
+PASSED
+tests/test_analysis_service_performance.py::test_classify_move_performance Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+
+============================================================
+Testing classify_move performance
+============================================================
+⏱️  Total time: 0.0015 seconds
+📊 Total calls: 5000
+⚡ Time per call: 0.30 microseconds
+✅ Performance: EXCELLENT
+PASSED
+tests/test_analysis_service_performance.py::test_parse_pgn_performance Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+
+============================================================
+Testing parse_pgn performance
+============================================================
+⏱️  Total time: 1.8420 seconds
+📊 Total calls: 1000
+⚡ Time per call: 1.842 milliseconds
+✅ Performance: GOOD
+PASSED
+tests/test_analysis_service_performance.py::test_analyze_position_performance Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+
+============================================================
+Testing analyze_position performance
+============================================================
+⏱️  Total time: 1.29 seconds
+✅ Success: True
+📊 Evaluation: 40.0
+🎯 Best move: e4
+PASSED
+tests/test_analysis_service_performance.py::test_analyze_game_breakdown Using Ollama with model: llama3.1 at http://host.docker.internal:11434
+
+============================================================
+Performance Breakdown Analysis
+============================================================
+📝 Parse PGN: 0.0016s
+📋 Build move list: 0.0008s
+🔍 Full analysis: 17.13s
+📊 Moves: 20
+
+💡 Breakdown:
+   - Setup overhead: 0.0024s (0.0%)
+   - Engine analysis: 17.13s (100.0%)
+PASSED
+
+======================================= warnings summary ========================================
+../usr/local/lib/python3.11/site-packages/pydantic/_internal/_config.py:268
+  /usr/local/lib/python3.11/site-packages/pydantic/_internal/_config.py:268: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+app/database.py:15
+  /app/app/database.py:15: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: ht https://sqlalche.me/e/b8d9)
+    Base = declarative_base()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== 7 passed, 2 warnings in 183.03s (0:03:03) =========================== 
+(gpu-embeddings) PS C:\Users\lucas\Desktop\ChessGPT>
+
+
+
+

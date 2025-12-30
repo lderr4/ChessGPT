@@ -67,35 +67,43 @@ const GameViewer = () => {
   const [liveEvaluation, setLiveEvaluation] = useState<number | null>(null);
   const [liveBestMove, setLiveBestMove] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [moveHighlight, setMoveHighlight] = useState<{from: string; to: string} | null>(null);
+  const [moveHighlight, setMoveHighlight] = useState<{
+    from: string;
+    to: string;
+  } | null>(null);
 
   // Helper function to format coach commentary
   const formatCoachCommentary = (text: string) => {
     // Remove any markdown formatting
-    let cleaned = text.replace(/\*\*/g, '');
-    
+    let cleaned = text.replace(/\*\*/g, "");
+
     // Split into sentences for better readability
     const sentences = cleaned
       .split(/(?<=[.!?])\s+/)
-      .filter(s => s.trim().length > 0);
-    
+      .filter((s) => s.trim().length > 0);
+
     return sentences;
   };
 
   // Calculate material advantage
   const calculateMaterialAdvantage = (fen: string) => {
-    const pieces = fen.split(' ')[0];
+    const pieces = fen.split(" ")[0];
     const materialValues: Record<string, number> = {
-      'q': 9, 'Q': 9,
-      'r': 5, 'R': 5,
-      'b': 3, 'B': 3,
-      'n': 3, 'N': 3,
-      'p': 1, 'P': 1
+      q: 9,
+      Q: 9,
+      r: 5,
+      R: 5,
+      b: 3,
+      B: 3,
+      n: 3,
+      N: 3,
+      p: 1,
+      P: 1,
     };
-    
+
     let whiteMaterial = 0;
     let blackMaterial = 0;
-    
+
     for (const char of pieces) {
       if (materialValues[char]) {
         if (char === char.toUpperCase()) {
@@ -105,18 +113,18 @@ const GameViewer = () => {
         }
       }
     }
-    
+
     const diff = whiteMaterial - blackMaterial;
     const advantage = Math.abs(diff);
-    const side = diff > 0 ? 'white' : diff < 0 ? 'black' : 'equal';
-    
+    const side = diff > 0 ? "white" : diff < 0 ? "black" : "equal";
+
     // Determine piece icon for advantage
-    let pieceIcon = '';
-    if (advantage >= 9) pieceIcon = side === 'white' ? '♕' : '♛';
-    else if (advantage >= 5) pieceIcon = side === 'white' ? '♖' : '♜';
-    else if (advantage >= 3) pieceIcon = side === 'white' ? '♗' : '♝';
-    else if (advantage >= 1) pieceIcon = side === 'white' ? '♙' : '♟';
-    
+    let pieceIcon = "";
+    if (advantage >= 9) pieceIcon = side === "white" ? "♕" : "♛";
+    else if (advantage >= 5) pieceIcon = side === "white" ? "♖" : "♜";
+    else if (advantage >= 3) pieceIcon = side === "white" ? "♗" : "♝";
+    else if (advantage >= 1) pieceIcon = side === "white" ? "♙" : "♟";
+
     return { advantage, side, pieceIcon };
   };
 
@@ -130,25 +138,25 @@ const GameViewer = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!game) return;
-      
+
       // Prevent default behavior for arrow keys
-      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+      if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
         e.preventDefault();
-        
-        if (e.key === 'ArrowLeft') {
+
+        if (e.key === "ArrowLeft") {
           goToPrevious();
-        } else if (e.key === 'ArrowRight') {
+        } else if (e.key === "ArrowRight") {
           goToNext();
-        } else if (e.key === 'ArrowUp') {
+        } else if (e.key === "ArrowUp") {
           goToStart();
-        } else if (e.key === 'ArrowDown') {
+        } else if (e.key === "ArrowDown") {
           goToEnd();
         }
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [game, currentMoveIndex]); // Re-attach when game or move index changes
 
   const fetchGame = async (id: number) => {
@@ -475,7 +483,8 @@ const GameViewer = () => {
               </div>
               {isAnalysisMode && (
                 <div className="text-xs text-gray-500 italic">
-                  💡 Live analysis may differ slightly from game analysis due to engine calculation variations
+                  💡 Live analysis may differ slightly from game analysis due to
+                  engine calculation variations
                 </div>
               )}
             </div>
@@ -546,7 +555,9 @@ const GameViewer = () => {
                 <div className="flex items-center gap-3">
                   <span className="text-2xl">♟️</span>
                   <div>
-                    <p className="text-xs text-gray-600 font-medium">Current Position</p>
+                    <p className="text-xs text-gray-600 font-medium">
+                      Current Position
+                    </p>
                     {currentMove && currentMoveIndex >= 0 ? (
                       <p className="text-2xl font-bold text-gray-900">
                         {currentMove.move_number}.
@@ -563,14 +574,17 @@ const GameViewer = () => {
                 <div className="flex items-center gap-3">
                   {/* Material Advantage */}
                   {(() => {
-                    const material = calculateMaterialAdvantage(currentPosition);
+                    const material =
+                      calculateMaterialAdvantage(currentPosition);
                     if (material.advantage > 0) {
                       return (
-                        <div className={`px-3 py-1 rounded-lg font-semibold flex items-center gap-1 ${
-                          material.side === 'white' 
-                            ? 'bg-gray-100 text-gray-800' 
-                            : 'bg-gray-800 text-white'
-                        }`}>
+                        <div
+                          className={`px-3 py-1 rounded-lg font-semibold flex items-center gap-1 ${
+                            material.side === "white"
+                              ? "bg-gray-100 text-gray-800"
+                              : "bg-gray-800 text-white"
+                          }`}
+                        >
                           <span className="text-xl">{material.pieceIcon}</span>
                           <span className="text-sm">+{material.advantage}</span>
                         </div>
@@ -578,7 +592,7 @@ const GameViewer = () => {
                     }
                     return null;
                   })()}
-                  
+
                   {currentMove?.classification && (
                     <span
                       className={`px-3 py-1 rounded-full text-sm font-semibold ${getClassificationColor(
@@ -671,149 +685,151 @@ const GameViewer = () => {
               <div className="mt-4">
                 <details className="group">
                   <summary className="cursor-pointer font-semibold text-gray-900 mb-3 flex items-center gap-2 hover:text-primary-600">
-                    <span className="group-open:rotate-90 transition-transform">▶</span>
+                    <span className="group-open:rotate-90 transition-transform">
+                      ▶
+                    </span>
                     📈 Game Evaluation Graph
                   </summary>
                   <div className="bg-gray-50 rounded-lg p-4">
                     <ResponsiveContainer width="100%" height={200}>
-                    <LineChart
-                      data={prepareChartData()}
-                      onClick={(data) => {
-                        if (
-                          data &&
-                          data.activePayload &&
-                          data.activePayload[0]
-                        ) {
-                          const halfMove =
-                            data.activePayload[0].payload.halfMove;
-                          goToMove(halfMove);
-                        }
-                      }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis
-                        dataKey="moveNumber"
-                        label={{
-                          value: "Move Number",
-                          position: "insideBottom",
-                          offset: -5,
-                        }}
-                        tick={{ fontSize: 12 }}
-                      />
-                      <YAxis
-                        label={{
-                          value: "Evaluation (Pawns)",
-                          angle: -90,
-                          position: "insideLeft",
-                        }}
-                        tick={{ fontSize: 12 }}
-                        domain={[-10, 10]}
-                      />
-                      <Tooltip
-                        content={({ active, payload }) => {
-                          if (active && payload && payload.length) {
-                            const data = payload[0].payload;
-                            return (
-                              <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
-                                <p className="font-semibold text-gray-900">
-                                  Move {data.moveNumber}: {data.move}
-                                </p>
-                                <p className="text-sm text-gray-600">
-                                  Eval: {data.evaluation.toFixed(2)}
-                                </p>
-                                <p className="text-sm text-primary-600 font-medium">
-                                  {data.phaseName}
-                                </p>
-                              </div>
-                            );
+                      <LineChart
+                        data={prepareChartData()}
+                        onClick={(data) => {
+                          if (
+                            data &&
+                            data.activePayload &&
+                            data.activePayload[0]
+                          ) {
+                            const halfMove =
+                              data.activePayload[0].payload.halfMove;
+                            goToMove(halfMove);
                           }
-                          return null;
                         }}
-                      />
-                      <ReferenceLine y={0} stroke="#9ca3af" strokeWidth={2} />
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis
+                          dataKey="moveNumber"
+                          label={{
+                            value: "Move Number",
+                            position: "insideBottom",
+                            offset: -5,
+                          }}
+                          tick={{ fontSize: 12 }}
+                        />
+                        <YAxis
+                          label={{
+                            value: "Evaluation (Pawns)",
+                            angle: -90,
+                            position: "insideLeft",
+                          }}
+                          tick={{ fontSize: 12 }}
+                          domain={[-10, 10]}
+                        />
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div className="bg-white p-3 border border-gray-200 rounded-lg shadow-lg">
+                                  <p className="font-semibold text-gray-900">
+                                    Move {data.moveNumber}: {data.move}
+                                  </p>
+                                  <p className="text-sm text-gray-600">
+                                    Eval: {data.evaluation.toFixed(2)}
+                                  </p>
+                                  <p className="text-sm text-primary-600 font-medium">
+                                    {data.phaseName}
+                                  </p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <ReferenceLine y={0} stroke="#9ca3af" strokeWidth={2} />
 
-                      {/* Color different phases */}
-                      <defs>
-                        <linearGradient
-                          id="colorOpening"
-                          x1="0"
-                          y1="0"
-                          x2="1"
-                          y2="0"
-                        >
-                          <stop
-                            offset="0%"
-                            stopColor="#3b82f6"
-                            stopOpacity={0.1}
-                          />
-                          <stop
-                            offset="100%"
-                            stopColor="#3b82f6"
-                            stopOpacity={0.1}
-                          />
-                        </linearGradient>
-                        <linearGradient
-                          id="colorMiddlegame"
-                          x1="0"
-                          y1="0"
-                          x2="1"
-                          y2="0"
-                        >
-                          <stop
-                            offset="0%"
-                            stopColor="#10b981"
-                            stopOpacity={0.1}
-                          />
-                          <stop
-                            offset="100%"
-                            stopColor="#10b981"
-                            stopOpacity={0.1}
-                          />
-                        </linearGradient>
-                        <linearGradient
-                          id="colorEndgame"
-                          x1="0"
-                          y1="0"
-                          x2="1"
-                          y2="0"
-                        >
-                          <stop
-                            offset="0%"
-                            stopColor="#f59e0b"
-                            stopOpacity={0.1}
-                          />
-                          <stop
-                            offset="100%"
-                            stopColor="#f59e0b"
-                            stopOpacity={0.1}
-                          />
-                        </linearGradient>
-                      </defs>
+                        {/* Color different phases */}
+                        <defs>
+                          <linearGradient
+                            id="colorOpening"
+                            x1="0"
+                            y1="0"
+                            x2="1"
+                            y2="0"
+                          >
+                            <stop
+                              offset="0%"
+                              stopColor="#3b82f6"
+                              stopOpacity={0.1}
+                            />
+                            <stop
+                              offset="100%"
+                              stopColor="#3b82f6"
+                              stopOpacity={0.1}
+                            />
+                          </linearGradient>
+                          <linearGradient
+                            id="colorMiddlegame"
+                            x1="0"
+                            y1="0"
+                            x2="1"
+                            y2="0"
+                          >
+                            <stop
+                              offset="0%"
+                              stopColor="#10b981"
+                              stopOpacity={0.1}
+                            />
+                            <stop
+                              offset="100%"
+                              stopColor="#10b981"
+                              stopOpacity={0.1}
+                            />
+                          </linearGradient>
+                          <linearGradient
+                            id="colorEndgame"
+                            x1="0"
+                            y1="0"
+                            x2="1"
+                            y2="0"
+                          >
+                            <stop
+                              offset="0%"
+                              stopColor="#f59e0b"
+                              stopOpacity={0.1}
+                            />
+                            <stop
+                              offset="100%"
+                              stopColor="#f59e0b"
+                              stopOpacity={0.1}
+                            />
+                          </linearGradient>
+                        </defs>
 
-                      <Line
-                        type="monotone"
-                        dataKey="evaluation"
-                        stroke="#8b5cf6"
-                        strokeWidth={2}
-                        dot={(props: any) => {
-                          const { cx, cy, payload } = props;
-                          if (payload.halfMove === currentMoveIndex) {
-                            return (
-                              <circle
-                                cx={cx}
-                                cy={cy}
-                                r={6}
-                                fill="#8b5cf6"
-                                stroke="#fff"
-                                strokeWidth={2}
-                              />
-                            );
-                          }
-                          return null;
-                        }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                        <Line
+                          type="monotone"
+                          dataKey="evaluation"
+                          stroke="#8b5cf6"
+                          strokeWidth={2}
+                          dot={(props: any) => {
+                            const { cx, cy, payload } = props;
+                            if (payload.halfMove === currentMoveIndex) {
+                              return (
+                                <circle
+                                  cx={cx}
+                                  cy={cy}
+                                  r={6}
+                                  fill="#8b5cf6"
+                                  stroke="#fff"
+                                  strokeWidth={2}
+                                />
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
 
                     {/* Graph Legend */}
                     <div className="mt-3 text-center text-xs text-gray-500">
@@ -846,14 +862,6 @@ const GameViewer = () => {
                     {getClassificationSymbol(currentMove.classification)}
                   </span>
                 </div>
-                {currentMove.centipawn_loss !== null && (
-                  <div>
-                    <span className="text-gray-600">CP Loss: </span>
-                    <span className="font-medium text-gray-900">
-                      {currentMove.centipawn_loss.toFixed(1)}
-                    </span>
-                  </div>
-                )}
                 {currentMove.evaluation_after !== null && (
                   <div>
                     <span className="text-gray-600">Evaluation: </span>
@@ -868,7 +876,9 @@ const GameViewer = () => {
                     {getGamePhase(currentMoveIndex, game.moves.length)
                       .charAt(0)
                       .toUpperCase() +
-                      getGamePhase(currentMoveIndex, game.moves.length).slice(1)}
+                      getGamePhase(currentMoveIndex, game.moves.length).slice(
+                        1
+                      )}
                   </span>
                 </div>
               </div>
@@ -886,9 +896,16 @@ const GameViewer = () => {
                         </span>
                       </h4>
                       <div className="space-y-2">
-                        {formatCoachCommentary(currentMove.coach_commentary).map((sentence, idx) => (
-                          <p key={idx} className="text-gray-800 text-sm leading-relaxed flex items-start gap-2">
-                            <span className="text-purple-400 font-bold mt-0.5">•</span>
+                        {formatCoachCommentary(
+                          currentMove.coach_commentary
+                        ).map((sentence, idx) => (
+                          <p
+                            key={idx}
+                            className="text-gray-800 text-sm leading-relaxed flex items-start gap-2"
+                          >
+                            <span className="text-purple-400 font-bold mt-0.5">
+                              •
+                            </span>
                             <span className="flex-1">{sentence}</span>
                           </p>
                         ))}

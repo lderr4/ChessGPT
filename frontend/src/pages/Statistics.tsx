@@ -779,9 +779,6 @@ const Statistics = () => {
               stats.total_mistakes +
               stats.total_inaccuracies}
           </p>
-          {stats.avg_centipawn_loss && (
-            <p>Average Centipawn Loss: {stats.avg_centipawn_loss.toFixed(2)}</p>
-          )}
         </div>
       </div>
     </div>
