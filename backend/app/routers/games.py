@@ -16,6 +16,7 @@ from ..auth import get_current_user
 from ..services.chess_com_service import ChessComService
 from ..services.analysis_service import AnalysisService
 from ..services.stats_service import StatsService
+from ..worker.celery_app import analyze_game_task
 
 router = APIRouter(prefix="/games", tags=["Games"])
 
@@ -394,13 +395,11 @@ def get_game(
 @router.post("/{game_id}/analyze", status_code=202)
 async def analyze_game(
     game_id: int,
-    background_tasks: BackgroundTasks,
-    force: bool = Query(False, description="Force re-analysis even if already analyzed"),
+    force: bool = Query(False),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Trigger analysis for a specific game"""
-    
+    # 1. Standard Validation & DB fetching
     game = db.query(Game).filter(
         Game.id == game_id,
         Game.user_id == current_user.id
@@ -412,35 +411,23 @@ async def analyze_game(
     if game.analysis_state == "analyzed" and not force:
         return {"message": "Game already analyzed", "status": "completed"}
     
-    # If forcing re-analysis, delete existing moves and reset analysis flag
+    # 2. Prepare the DB for the worker
     if force and game.analysis_state == "analyzed":
         db.query(Move).filter(Move.game_id == game_id).delete()
         game.is_analyzed = False
-        game.analysis_state = "unanalyzed"
         game.analyzed_at = None
-        db.commit()
-    
-    # Set analysis state to in_progress
+
     game.analysis_state = "in_progress"
     db.commit()
-    db.refresh(game)  # Refresh to ensure the state is persisted
     
-    # Verify the state was saved
-    db.refresh(game)
-    if game.analysis_state != "in_progress":
-        print(f"ERROR: Game {game_id} analysis_state is '{game.analysis_state}' after setting to 'in_progress'")
-    else:
-        print(f"✓ Game {game_id} analysis_state successfully set to 'in_progress'")
-    
-    # Start background analysis (pass game_id only, not db session)
-    # The background task will create its own session
-    background_tasks.add_task(analyze_game_background, game_id)
+    # 3. THE MAGIC LINE: Dispatch to Redis
+    # Instead of BackgroundTasks, we send a message to the worker container
+    analyze_game_task.delay(game_id)
     
     return {
-        "message": "Game analysis started" if not force else "Game re-analysis started",
+        "message": "Analysis queued in cloud" if not force else "Re-analysis queued",
         "status": "processing"
     }
-
 
 @router.post("/analyze/position", response_model=PositionAnalysisResponse)
 async def analyze_position(

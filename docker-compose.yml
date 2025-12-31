@@ -1,6 +1,7 @@
 version: "3.8"
 
 services:
+  # ... Postgres and Redis remain exactly the same ...
   postgres:
     image: postgres:15-alpine
     container_name: chess_analytics_db
@@ -29,24 +30,20 @@ services:
       timeout: 5s
       retries: 5
 
-  backend:
+  # 1. THE API SERVICE (Renamed from 'backend')
+  # Role: HTTP Server, Producer of Tasks, I/O Bound
+  api:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: chess_analytics_backend
+    container_name: chess_analytics_api
     environment:
+      # ... All your env vars remain the same ...
       DATABASE_URL: postgresql://chess_user:chess_password@postgres:5432/chess_analytics
       REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: dev-secret-key-change-in-production
-      CHESS_COM_USER_AGENT: ChessAnalytics/1.0 (development)
-      STOCKFISH_PATH: /usr/games/stockfish
-      # AI Coach Settings
-      ENABLE_COACH: true
-      COACH_PROVIDER: ollama
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
-      OLLAMA_MODEL: llama3.1
+      # ...
     ports:
-      - "8000:8000"
+      - "8000:8000" # Only the API needs to be exposed
     volumes:
       - ./backend:/app
     depends_on:
@@ -54,25 +51,65 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # Command stays as the web server start
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-  frontend:
+  # 2. THE WORKER SERVICE (New)
+  # Role: Consumer of Tasks, CPU Bound (Stockfish)
+  stockfish_worker:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile.dev
-    container_name: chess_analytics_frontend
+      context: ./backend # Re-use the same code/image for now
+      dockerfile: Dockerfile
+    # No container_name here! If you set a static name, you cannot scale it (you'd get name conflicts).
     environment:
+      DATABASE_URL: postgresql://chess_user:chess_password@postgres:5432/chess_analytics
+      REDIS_URL: redis://redis:6379/0
+      STOCKFISH_PATH: /usr/games/stockfish
+      # OLLAMA CONFIG (Workers need this for the AI Coach logic)
+      ENABLE_COACH: false
+      COACH_PROVIDER: ollama
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: llama3.1
+    volumes:
+      - ./backend:/app # Useful for dev so you don't have to rebuild to change worker logic
+    depends_on:
+      api: 
+        condition: service_started # Wait for API just to be safe, though technically only needs Redis
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # THE CRITICAL DIFFERENCE: This command starts the queue listener, NOT the web server.
+    # We will implement "app.worker" in the next layer.
+    command: celery -A app.worker worker --loglevel=info 
+
+  frontend:
+
+    build:
+
+      context: ./frontend
+
+      dockerfile: Dockerfile.dev
+
+    container_name: chess_analytics_frontend
+
+    environment:
+
       - VITE_API_URL=http://localhost:8000
+
     ports:
+
       - "5173:5173"
+
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      
+    command: 
+      - npm run dev -- --host
     depends_on:
-      - backend
-    command: npm run dev -- --host
+      - api
+
 
 volumes:
-  postgres_data:
+  postgres_data: 

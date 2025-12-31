@@ -34,7 +34,6 @@ class Settings(BaseSettings):
     
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
-    
     # Environment
     ENVIRONMENT: str = "development"
     
