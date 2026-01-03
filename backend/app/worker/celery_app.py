@@ -1,6 +1,10 @@
 # app/worker/celery_app.py
 from celery import Celery
 from app.config import settings
+from app.logging_config import setup_logging
+
+# Set up logging with datetime before initializing Celery
+setup_logging()
 
 celery_app = Celery(
     "chess_analytics",

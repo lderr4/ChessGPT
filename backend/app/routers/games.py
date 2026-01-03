@@ -1,7 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi.responses import StreamingResponse
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
+import json
+import asyncio
+import logging
+from sse_starlette.sse import EventSourceResponse
 from ..database import get_db
 from ..models import User, Game, Move, ImportJob, AnalysisJob
 from ..schemas import (
@@ -12,11 +18,16 @@ from ..schemas import (
     PositionAnalysisRequest,
     PositionAnalysisResponse
 )
-from ..auth import get_current_user
+from ..auth import get_current_user, decode_token
+from ..config import settings
 from ..services.chess_com_service import ChessComService
 from ..services.analysis_service import AnalysisService
 from ..services.stats_service import StatsService
-from ..worker.celery_app import analyze_game_task
+from ..services.redis_pubsub import redis_pubsub
+from ..worker.tasks import analyze_game_task
+
+logger = logging.getLogger(__name__)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
 router = APIRouter(prefix="/games", tags=["Games"])
 
@@ -399,6 +410,11 @@ async def analyze_game(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Analysis request received for game {game_id} by user {current_user.id} (force={force})")
+    
     # 1. Standard Validation & DB fetching
     game = db.query(Game).filter(
         Game.id == game_id,
@@ -406,23 +422,29 @@ async def analyze_game(
     ).first()
     
     if not game:
+        logger.warning(f"Game {game_id} not found for user {current_user.id}")
         raise HTTPException(status_code=404, detail="Game not found")
     
     if game.analysis_state == "analyzed" and not force:
+        logger.info(f"Game {game_id} already analyzed, skipping")
         return {"message": "Game already analyzed", "status": "completed"}
     
     # 2. Prepare the DB for the worker
     if force and game.analysis_state == "analyzed":
-        db.query(Move).filter(Move.game_id == game_id).delete()
+        logger.info(f"Force re-analysis requested for game {game_id}, deleting existing moves")
+        deleted_moves = db.query(Move).filter(Move.game_id == game_id).delete()
+        logger.debug(f"Deleted {deleted_moves} existing move records")
         game.is_analyzed = False
         game.analyzed_at = None
 
     game.analysis_state = "in_progress"
     db.commit()
+    logger.info(f"Game {game_id} marked as 'in_progress' and queued for analysis")
     
     # 3. THE MAGIC LINE: Dispatch to Redis
     # Instead of BackgroundTasks, we send a message to the worker container
-    analyze_game_task.delay(game_id)
+    task = analyze_game_task.delay(game_id)
+    logger.info(f"Analysis task queued for game {game_id} with task_id={task.id}")
     
     return {
         "message": "Analysis queued in cloud" if not force else "Re-analysis queued",
@@ -448,106 +470,27 @@ async def analyze_position(
     return result
 
 
-async def analyze_all_games_background(user_id: int, job_id: int, db: Session):
-    """Background task to analyze all unanalyzed games for a user"""
-    job = db.query(AnalysisJob).filter(AnalysisJob.id == job_id).first()
-    
-    try:
-        # Update job status
-        job.status = "processing"
-        job.started_at = datetime.utcnow()
-        db.commit()
-        
-        # Get all unanalyzed games for this user
-        games = db.query(Game).filter(
-            Game.user_id == user_id,
-            Game.analysis_state != "analyzed"
-        ).all()
-        
-        job.total_games = len(games)
-        db.commit()
-        
-        if len(games) == 0:
-            job.status = "completed"
-            job.completed_at = datetime.utcnow()
-            job.progress = 100
-            db.commit()
-            return
-        
-        # Analyze each game
-        analysis_service = AnalysisService()
-        for i, game in enumerate(games):
-            try:
-                # Set state to in_progress
-                game.analysis_state = "in_progress"
-                db.commit()
-                
-                result = await analysis_service.analyze_game(game.pgn, game.user_color)
-                
-                if "error" not in result:
-                    # Update game with analysis results
-                    stats = result.get("stats", {})
-                    game.is_analyzed = True
-                    game.analysis_state = "analyzed"
-                    game.num_moves = stats.get("num_moves", 0)
-                    game.average_centipawn_loss = stats.get("average_centipawn_loss")
-                    game.accuracy = stats.get("accuracy")
-                    game.num_blunders = stats.get("num_blunders", 0)
-                    game.num_mistakes = stats.get("num_mistakes", 0)
-                    game.num_inaccuracies = stats.get("num_inaccuracies", 0)
-                    game.analyzed_at = datetime.utcnow()
-                    
-                    # Store move analysis
-                    for move_data in result.get("moves", []):
-                        move = Move(
-                            game_id=game.id,
-                            **move_data
-                        )
-                        db.add(move)
-                    
-                    job.analyzed_games += 1
-                else:
-                    # Mark as analyzed even if error to prevent retry
-                    game.is_analyzed = True
-                    game.analysis_state = "analyzed"
-                    game.analyzed_at = datetime.utcnow()
-                
-                # Update progress
-                job.progress = int(((i + 1) / len(games)) * 100)
-                db.commit()
-                
-            except Exception as e:
-                print(f"Error analyzing game {game.id}: {e}")
-                # Mark as analyzed to prevent infinite retries
-                game.is_analyzed = True
-                game.analysis_state = "analyzed"
-                game.analyzed_at = datetime.utcnow()
-                db.commit()
-        
-        # Update user stats after all analysis
-        StatsService.calculate_user_stats(db, user_id)
-        
-        # Mark job as completed
-        job.status = "completed"
-        job.completed_at = datetime.utcnow()
-        job.progress = 100
-        db.commit()
-        
-    except Exception as e:
-        print(f"Batch analysis job failed: {e}")
-        job.status = "failed"
-        job.error_message = str(e)
-        job.completed_at = datetime.utcnow()
-        db.commit()
-
-
 @router.post("/analyze/all", status_code=202)
 def analyze_all_games(
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Start batch analysis of all unanalyzed games"""
+    """Start batch analysis of all unanalyzed games using Celery queue"""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Check if user already has a processing job
+    existing_job = db.query(AnalysisJob).filter(
+        AnalysisJob.user_id == current_user.id,
+        AnalysisJob.status.in_(["pending", "processing"])
+    ).first()
+    
+    if existing_job:
+        logger.warning(f"User {current_user.id} already has an active analysis job {existing_job.id}")
+        raise HTTPException(
+            status_code=429,
+            detail=f"You already have an analysis job in progress. Job #{existing_job.id} is currently {existing_job.status}."
+        )
     
     # Create analysis job
     job = AnalysisJob(
@@ -561,11 +504,15 @@ def analyze_all_games(
     db.commit()
     db.refresh(job)
     
-    # Start background analysis
-    background_tasks.add_task(analyze_all_games_background, current_user.id, job.id, db)
+    logger.info(f"Created analysis job {job.id} for user {current_user.id}")
+    
+    # Dispatch to Celery queue instead of BackgroundTasks
+    from ..worker.tasks import batch_analyze_games_task
+    task = batch_analyze_games_task.delay(current_user.id, job.id)
+    logger.info(f"Batch analysis task queued for job {job.id} with task_id={task.id}")
     
     return {
-        "message": "Batch analysis started",
+        "message": "Batch analysis queued",
         "job_id": job.id,
         "status": "pending"
     }
@@ -598,6 +545,157 @@ def get_analysis_status(
         "started_at": job.started_at,
         "completed_at": job.completed_at
     }
+
+
+async def get_current_user_from_token_or_query(
+    token: Optional[str] = Depends(oauth2_scheme),
+    token_query: Optional[str] = Query(None, alias="token"),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Get current user from either Authorization header or query parameter.
+    This allows EventSource (which doesn't support headers) to authenticate via query param.
+    """
+    # Try query parameter first (for EventSource)
+    auth_token = token_query or token
+    
+    if not auth_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    try:
+        token_data = decode_token(auth_token)
+        user = db.query(User).filter(User.username == token_data.username).first()
+        
+        if user is None:
+            raise HTTPException(
+                status_code=401,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        if not user.is_active:
+            raise HTTPException(
+                status_code=400,
+                detail="Inactive user"
+            )
+        
+        return user
+    except Exception as e:
+        logger.warning(f"Authentication failed for SSE endpoint: {e}")
+        raise HTTPException(
+            status_code=401,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+@router.get("/events/analysis")
+async def stream_analysis_events(
+    current_user: User = Depends(get_current_user_from_token_or_query)
+):
+    """
+    Server-Sent Events endpoint for real-time game analysis updates.
+    
+    Frontend can subscribe to this endpoint to receive notifications when games
+    finish analyzing. Events are streamed via SSE as they occur.
+    
+    Authentication can be provided via:
+    - Authorization header: `Bearer <token>` (standard)
+    - Query parameter: `?token=<token>` (for EventSource compatibility)
+    
+    Returns:
+        EventSourceResponse: SSE stream of game analysis completion events
+    """
+    logger.info(f"SSE connection established for user {current_user.id} (username: {current_user.username})")
+    
+    async def event_generator():
+        """Generator function that yields SSE events from Redis"""
+        pubsub = None
+        try:
+            # Get Redis subscriber for this user
+            pubsub = redis_pubsub.get_subscriber(current_user.id)
+            
+            # Send initial connection message
+            yield {
+                "event": "connected",
+                "data": json.dumps({
+                    "message": "Connected to analysis events stream",
+                    "user_id": current_user.id,
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+            }
+            logger.debug(f"Sent connection event to user {current_user.id}")
+            
+            # Listen for messages from Redis
+            while True:
+                try:
+                    # Check for new messages (non-blocking with timeout)
+                    message = pubsub.get_message(timeout=1.0, ignore_subscribe_messages=True)
+                    
+                    if message and message['type'] == 'message':
+                        # Parse the message data
+                        try:
+                            data = json.loads(message['data'])
+                            logger.debug(
+                                f"Received Redis message for user {current_user.id}: "
+                                f"game_id={data.get('game_id')}, type={data.get('type')}"
+                            )
+                            
+                            # Send SSE event to frontend
+                            yield {
+                                "event": "game_analysis_completed",
+                                "data": json.dumps(data)
+                            }
+                            logger.info(
+                                f"Sent SSE event to user {current_user.id}: "
+                                f"game {data.get('game_id')} analysis completed"
+                            )
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Failed to parse Redis message as JSON: {e}, message={message}")
+                        except Exception as e:
+                            logger.error(f"Error processing Redis message: {e}", exc_info=True)
+                    
+                    # Yield empty comment to keep connection alive
+                    await asyncio.sleep(0.1)
+                    
+                except asyncio.CancelledError:
+                    logger.info(f"SSE connection cancelled for user {current_user.id}")
+                    break
+                except Exception as e:
+                    logger.error(f"Error in SSE stream for user {current_user.id}: {e}", exc_info=True)
+                    # Send error event to client
+                    yield {
+                        "event": "error",
+                        "data": json.dumps({
+                            "error": "Stream error occurred",
+                            "message": str(e)
+                        })
+                    }
+                    await asyncio.sleep(1)  # Wait before retrying
+                    
+        except Exception as e:
+            logger.error(f"Fatal error in SSE stream for user {current_user.id}: {e}", exc_info=True)
+            yield {
+                "event": "error",
+                "data": json.dumps({
+                    "error": "Fatal stream error",
+                    "message": str(e)
+                })
+            }
+        finally:
+            # Clean up Redis subscription
+            if pubsub:
+                try:
+                    pubsub.close()
+                    logger.info(f"Closed Redis subscription for user {current_user.id}")
+                except Exception as e:
+                    logger.warning(f"Error closing Redis subscription for user {current_user.id}: {e}")
+    
+    return EventSourceResponse(event_generator())
 
 
 @router.delete("/{game_id}", status_code=204)

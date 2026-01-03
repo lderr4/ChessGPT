@@ -41,6 +41,7 @@ services:
       # ... All your env vars remain the same ...
       DATABASE_URL: postgresql://chess_user:chess_password@postgres:5432/chess_analytics
       REDIS_URL: redis://redis:6379/0
+      WATCHFILES_FORCE_POLLING: true
       # ...
     ports:
       - "8000:8000" # Only the API needs to be exposed
@@ -73,7 +74,7 @@ services:
     volumes:
       - ./backend:/app # Useful for dev so you don't have to rebuild to change worker logic
     depends_on:
-      api: 
+      api:
         condition: service_started # Wait for API just to be safe, though technically only needs Redis
       redis:
         condition: service_healthy
@@ -81,12 +82,10 @@ services:
       - "host.docker.internal:host-gateway"
     # THE CRITICAL DIFFERENCE: This command starts the queue listener, NOT the web server.
     # We will implement "app.worker" in the next layer.
-    command: celery -A app.worker worker --loglevel=info 
+    command: watchfiles --filter python "celery -A app.worker.celery_app.celery_app worker --loglevel=info --concurrency=4" # scale up to 4 workers (hard code for local dev)
 
   frontend:
-
     build:
-
       context: ./frontend
 
       dockerfile: Dockerfile.dev
@@ -94,22 +93,24 @@ services:
     container_name: chess_analytics_frontend
 
     environment:
-
       - VITE_API_URL=http://localhost:8000
 
     ports:
-
       - "5173:5173"
 
     volumes:
       - ./frontend:/app
       - /app/node_modules
-      
-    command: 
-      - npm run dev -- --host
+
     depends_on:
       - api
 
+    command:
+      - npm
+      - run
+      - dev
+      - "--"
+      - "--host"
 
 volumes:
-  postgres_data: 
+  postgres_data:

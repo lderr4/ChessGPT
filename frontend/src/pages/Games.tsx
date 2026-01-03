@@ -36,7 +36,6 @@ const Games = () => {
   const [showBatchAnalysisModal, setShowBatchAnalysisModal] = useState(false);
   const [batchAnalysisJob, setBatchAnalysisJob] = useState<any>(null);
   const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false);
-  const pollIntervalsRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
   const fetchGamesRef = useRef<() => Promise<void>>();
   const analyzingGameIdsRef = useRef<Set<number>>(new Set());
 
@@ -46,6 +45,112 @@ const Games = () => {
   useEffect(() => {
     analyzingGameIdsRef.current = analyzingGameIds;
   }, [analyzingGameIds]);
+
+  // SSE connection for real-time game analysis updates
+  useEffect(() => {
+    const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+    const token = localStorage.getItem("access_token");
+
+    if (!token) {
+      console.log("No auth token found, skipping SSE connection");
+      return;
+    }
+
+    // Build SSE URL with token as query parameter (EventSource doesn't support headers)
+    // Alternative: backend could use cookies for auth
+    const sseUrl = `${API_URL}/api/games/events/analysis?token=${encodeURIComponent(
+      token
+    )}`;
+
+    console.log("Connecting to SSE endpoint for analysis events...");
+    const eventSource = new EventSource(sseUrl);
+
+    eventSource.addEventListener("connected", (e) => {
+      const data = JSON.parse(e.data);
+      console.log("SSE connected:", data);
+    });
+
+    eventSource.addEventListener("game_analysis_completed", (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        console.log("Game analysis completed event received:", data);
+
+        const { game_id } = data;
+
+        if (!game_id) {
+          console.warn(
+            "Received analysis completion event without game_id:",
+            data
+          );
+          return;
+        }
+
+        // Update the specific game in state
+        setGames((prevGames) =>
+          prevGames.map((game) =>
+            game.id === game_id
+              ? { ...game, analysis_state: "analyzed" as const }
+              : game
+          )
+        );
+
+        // Remove from analyzing set
+        setAnalyzingGameIds((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(game_id);
+          console.log(
+            `Removed game ${game_id} from analyzing set. Remaining:`,
+            Array.from(newSet)
+          );
+          return newSet;
+        });
+
+        // Fetch updated game data to get analysis stats (accuracy, blunders, etc.)
+        // Update only this game in state to avoid triggering loading state
+        setTimeout(async () => {
+          try {
+            const response = await gamesAPI.getGame(game_id);
+            const updatedGame = response.data;
+            setGames((prevGames) =>
+              prevGames.map((game) =>
+                game.id === game_id
+                  ? {
+                      ...game,
+                      analysis_state: "analyzed" as const,
+                      is_analyzed: true,
+                      accuracy: updatedGame.accuracy,
+                      num_blunders: updatedGame.num_blunders,
+                      num_mistakes: updatedGame.num_mistakes,
+                      num_inaccuracies: updatedGame.num_inaccuracies,
+                    }
+                  : game
+              )
+            );
+            console.log(`Updated game ${game_id} with analysis stats`);
+          } catch (error) {
+            console.error(`Failed to fetch updated game ${game_id}:`, error);
+            // Game is already marked as analyzed, so this is not critical
+          }
+        }, 500);
+      } catch (error) {
+        console.error(
+          "Error processing game analysis completion event:",
+          error
+        );
+      }
+    });
+
+    eventSource.addEventListener("error", (e) => {
+      console.error("SSE connection error:", e);
+      // EventSource will automatically attempt to reconnect
+    });
+
+    // Cleanup on unmount
+    return () => {
+      console.log("Closing SSE connection");
+      eventSource.close();
+    };
+  }, []); // Only run once on mount
 
   const fetchGames = async () => {
     setIsLoading(true);
@@ -107,13 +212,6 @@ const Games = () => {
         });
         return newSet;
       });
-
-      // Start polling for any new in-progress games
-      inProgressGames.forEach((gameId: number) => {
-        if (!pollIntervalsRef.current.has(gameId)) {
-          startPollingForGame(gameId);
-        }
-      });
     } catch (error) {
       console.error("Failed to fetch games:", error);
     } finally {
@@ -159,14 +257,6 @@ const Games = () => {
             "Updated analyzingGameIds state and ref:",
             Array.from(inProgressSet)
           );
-
-          // Start polling for in-progress games
-          inProgressGameIds.forEach((gameId: number) => {
-            if (!pollIntervalsRef.current.has(gameId)) {
-              console.log(`Starting to poll for game ${gameId}`);
-              startPollingForGame(gameId);
-            }
-          });
         } else {
           console.log("No in-progress games found in API response");
         }
@@ -261,13 +351,6 @@ const Games = () => {
           console.log("Updated analyzingGameIds:", Array.from(newSet));
           return newSet;
         });
-
-        // Start polling for any new in-progress games
-        inProgressGames.forEach((gameId: number) => {
-          if (!pollIntervalsRef.current.has(gameId)) {
-            startPollingForGame(gameId);
-          }
-        });
       } catch (error) {
         console.error("Failed to fetch games:", error);
       } finally {
@@ -278,13 +361,6 @@ const Games = () => {
     loadGames();
   }, [page, filters]);
 
-  // Cleanup intervals on unmount
-  useEffect(() => {
-    return () => {
-      pollIntervalsRef.current.forEach((interval) => clearInterval(interval));
-    };
-  }, []);
-
   const handleFilterChange = (key: string, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
     setPage(0); // Reset to first page when filtering
@@ -293,78 +369,6 @@ const Games = () => {
   const clearFilters = () => {
     setFilters({ time_class: "", result: "", opening_eco: "" });
     setPage(0);
-  };
-
-  const startPollingForGame = (gameId: number) => {
-    // Don't start polling if already polling for this game
-    if (pollIntervalsRef.current.has(gameId)) {
-      console.log(`Already polling for game ${gameId}`);
-      return;
-    }
-
-    console.log(`Starting to poll for game ${gameId}`);
-    let attempts = 0;
-    const maxAttempts = 60; // 2 minutes max (60 * 2 seconds)
-
-    const checkStatus = setInterval(async () => {
-      attempts++;
-      try {
-        const response = await gamesAPI.getGame(gameId);
-        if (response.data.analysis_state === "analyzed") {
-          // Analysis complete
-          console.log(`Game ${gameId} analysis complete`);
-          clearInterval(checkStatus);
-          pollIntervalsRef.current.delete(gameId);
-          setAnalyzingGameIds((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(gameId);
-            return newSet;
-          });
-          // Refresh the games list
-          if (fetchGamesRef.current) {
-            fetchGamesRef.current();
-          }
-        } else if (response.data.analysis_state !== "in_progress") {
-          // Game is no longer in progress (might have been reset or error)
-          console.log(`Game ${gameId} is no longer in progress`);
-          clearInterval(checkStatus);
-          pollIntervalsRef.current.delete(gameId);
-          setAnalyzingGameIds((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(gameId);
-            return newSet;
-          });
-        } else if (attempts >= maxAttempts) {
-          // Timeout - stop polling
-          console.log(`Game ${gameId} polling timeout`);
-          clearInterval(checkStatus);
-          pollIntervalsRef.current.delete(gameId);
-          setAnalyzingGameIds((prev) => {
-            const newSet = new Set(prev);
-            newSet.delete(gameId);
-            return newSet;
-          });
-          alert(
-            `Analysis timeout for game ${gameId}. It may still be processing. Try refreshing in a minute.`
-          );
-        }
-      } catch (error) {
-        console.error(
-          `Error checking analysis status for game ${gameId}:`,
-          error
-        );
-        clearInterval(checkStatus);
-        pollIntervalsRef.current.delete(gameId);
-        setAnalyzingGameIds((prev) => {
-          const newSet = new Set(prev);
-          newSet.delete(gameId);
-          return newSet;
-        });
-      }
-    }, 2000); // Check every 2 seconds
-
-    // Store the interval ID
-    pollIntervalsRef.current.set(gameId, checkStatus);
   };
 
   // Update games array when analyzingGameIds changes to ensure UI reflects current state
@@ -403,7 +407,16 @@ const Games = () => {
     });
   }, [analyzingGameIds]); // Only re-run when analyzingGameIds changes
 
-  const handleAnalyzeGame = async (gameId: number) => {
+  const handleAnalyzeGame = async (
+    gameId: number,
+    event?: React.MouseEvent
+  ) => {
+    // Prevent any default behavior and stop propagation
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
     console.log(`Starting analysis for game ${gameId}`);
     // Add to analyzing set
     setAnalyzingGameIds((prev) => {
@@ -413,11 +426,9 @@ const Games = () => {
 
     try {
       await gamesAPI.analyzeGame(gameId);
-      console.log(`Analysis started for game ${gameId}, beginning polling`);
-      // Start polling for completion
-      startPollingForGame(gameId);
-      // Refresh games list to get updated analysis_state
-      fetchGames();
+      console.log(`Analysis started for game ${gameId}`);
+      // No need to refresh - UI is updated optimistically via analyzingGameIds state
+      // SSE will handle the update when analysis completes
     } catch (error) {
       console.error("Failed to analyze game:", error);
       alert("Failed to start analysis. Please try again.");
@@ -787,10 +798,8 @@ const Games = () => {
                         </span>
                       ) : (
                         <button
-                          onClick={(e) => {
-                            e.preventDefault();
-                            handleAnalyzeGame(game.id);
-                          }}
+                          type="button"
+                          onClick={(e) => handleAnalyzeGame(game.id, e)}
                           className="inline-flex items-center gap-1 px-3 py-1 text-xs font-medium text-primary-600 bg-primary-50 rounded hover:bg-primary-100 transition"
                           title="Analyze with Stockfish (~30-60 seconds)"
                         >

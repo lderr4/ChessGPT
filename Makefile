@@ -2,7 +2,6 @@ restart:
 	docker compose down
 	docker compose build
 	docker compose up -d
-	docker compose logs -f
 
 reset-analysis-job:
 	docker compose exec psql -U chess_user -d chess_analytics -c "SELECT id, user_id, status, progress, analyzed_games, total_games FROM analysis_jobs;"
@@ -12,3 +11,6 @@ run-performance-tests:
 
 run-validation-tests:
 	docker exec -it chess_analytics_backend sh -c "PYTHONPATH=/app pytest tests/test_analysis_service_validation.py -v -s -p no:conftest"
+
+clear-analyses:
+	docker exec -it chess_analytics_api python -m scripts.clear_analyses

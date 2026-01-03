@@ -2,10 +2,14 @@ import chess
 import chess.pgn
 import chess.engine
 import asyncio
+import logging
 from io import StringIO
 from typing import Any, List, Dict, Optional, Tuple
 from ..config import settings
 from .coach_service import CoachService
+
+# Set up logger for AnalysisService
+logger = logging.getLogger(__name__)
 
 
 class AnalysisService:
@@ -16,15 +20,18 @@ class AnalysisService:
         self.depth = settings.STOCKFISH_DEPTH
         self.time_limit = settings.STOCKFISH_TIME_LIMIT
         self.coach_service = CoachService()
+        logger.debug(f"AnalysisService initialized: depth={self.depth}, time_limit={self.time_limit}s, stockfish_path={self.stockfish_path}")
     
     def parse_pgn(self, pgn_string: str) -> Optional[chess.pgn.Game]:
         """Parse a PGN string into a chess.pgn.Game object"""
         try:
             pgn_io = StringIO(pgn_string)
             game = chess.pgn.read_game(pgn_io)
+            if game:
+                logger.debug(f"PGN parsed successfully: {game.headers.get('White', '?')} vs {game.headers.get('Black', '?')}")
             return game
         except Exception as e:
-            print(f"Error parsing PGN: {e}")
+            logger.error(f"Error parsing PGN: {e}")
             return None
     
     def classify_move(self, cp_loss: float, eval_before: Optional[float] = None, eval_after: Optional[float] = None) -> str:
@@ -139,8 +146,10 @@ class AnalysisService:
                 - stats: Overall game stats
 
         """
+        logger.info(f"Starting game analysis for user_color={user_color}")
         game = self.parse_pgn(pgn_string)
         if not game:
+            logger.error("Failed to parse PGN")
             return {"error": "Failed to parse PGN"}
         
         board = game.board()
@@ -157,9 +166,12 @@ class AnalysisService:
         
         # Determine if we should analyze this move (only user's moves)
         is_user_white = user_color == "white"
+        logger.debug(f"User is playing {'white' if is_user_white else 'black'}")
         
         try:
+            logger.debug(f"Starting Stockfish engine at {self.stockfish_path}")
             transport, engine = await chess.engine.popen_uci(self.stockfish_path)
+            logger.info("Stockfish engine started successfully")
             
             move_number = 1
             half_move = 0
@@ -178,7 +190,10 @@ class AnalysisService:
                 })
                 temp_board.push(move)
             
+            logger.info(f"Game has {len(all_moves)} moves to analyze")
+            
             # Analyze initial position (before first move)
+            logger.debug("Analyzing initial position")
             eval_before = None
             best_move = None
             try:
@@ -189,14 +204,19 @@ class AnalysisService:
                 eval_before = self.get_evaluation_cp(info)
                 pv = info.get("pv", [])
                 best_move = pv[0] if pv else None
+                logger.debug(f"Initial position evaluation: {eval_before} cp")
             except Exception as e:
-                print(f"Error evaluating initial position: {e}")
+                logger.warning(f"Error evaluating initial position: {e}")
             
             # Now analyze each move - reuse evaluation from previous position
             for idx, move_info in enumerate(all_moves):
                 move = move_info['move']
                 is_white_move = move_info['is_white']
                 move_san = move_info['san']
+                
+                # Log progress every 10 moves
+                if (idx + 1) % 10 == 0:
+                    logger.debug(f"Analyzing move {idx + 1}/{len(all_moves)}: {move_san}")
                 
                 # eval_before comes from previous iteration's eval_after (or initial analysis)
                 # best_move comes from previous analysis
@@ -215,7 +235,7 @@ class AnalysisService:
                     pv = info_after.get("pv", [])
                     next_best_move = pv[0] if pv else None
                 except Exception as e:
-                    print(f"Error evaluating position after move: {e}")
+                    logger.warning(f"Error evaluating position after move {move_san}: {e}")
                     eval_after = None
                     next_best_move = None
                 
@@ -254,8 +274,10 @@ class AnalysisService:
                 if should_analyze:
                     if classification == "blunder":
                         blunders += 1
+                        logger.debug(f"Blunder detected on move {move_san} (cp_loss={cp_loss:.1f})")
                     elif classification == "mistake":
                         mistakes += 1
+                        logger.debug(f"Mistake detected on move {move_san} (cp_loss={cp_loss:.1f})")
                     elif classification == "inaccuracy":
                         inaccuracies += 1
                 
@@ -294,14 +316,15 @@ class AnalysisService:
                                 timeout=25.0  # 25 second timeout for coach commentary
                             )
                         except asyncio.TimeoutError:
-                            print(f"Coach commentary generation timed out for move {move_san}. Continuing analysis without commentary.")
+                            logger.warning(f"Coach commentary generation timed out for move {move_san}. Continuing analysis without commentary.")
                             coach_commentary = None
                         
                         # Increment counter if commentary was generated
                         if coach_commentary:
                             coach_commentary_count += 1
+                            logger.debug(f"Coach commentary generated for move {move_san} ({coach_commentary_count}/{max_coach_commentaries})")
                     except Exception as e:
-                        print(f"Error generating coach commentary: {e}")
+                        logger.warning(f"Error generating coach commentary for move {move_san}: {e}")
                         coach_commentary = None
                 
                 # Store move analysis (cp_loss not stored, only used for classification)
@@ -329,6 +352,7 @@ class AnalysisService:
                 half_move += 1
             
             await engine.quit()
+            logger.debug("Stockfish engine closed")
             
             # Calculate overall statistics
             # Note: average_centipawn_loss is not stored, but accuracy can still be calculated
@@ -339,6 +363,10 @@ class AnalysisService:
             accuracy = None
             if avg_cp_loss is not None:
                 accuracy = max(0, min(100, 100 - avg_cp_loss / 10))
+            
+            logger.info(f"Analysis complete: {len(moves_analysis)} moves analyzed, accuracy={accuracy:.1f}%, "
+                       f"blunders={blunders}, mistakes={mistakes}, inaccuracies={inaccuracies}, "
+                       f"coach_commentaries={coach_commentary_count}")
             
             return {
                 "moves": moves_analysis,
@@ -353,7 +381,7 @@ class AnalysisService:
             }
             
         except Exception as e:
-            print(f"Error during analysis: {e}")
+            logger.exception(f"Error during analysis: {e}")
             return {"error": str(e)}
     
     def detect_opening(self, pgn_string: str) -> Tuple[Optional[str], Optional[str], int]:
@@ -394,16 +422,19 @@ class AnalysisService:
                 - best_move_san: Best move in SAN format
                 - mate_in: Moves until mate (if applicable)
         """
+        logger.debug(f"Analyzing position: {fen}")
         try:
             board = chess.Board(fen)
         except Exception as e:
-            print(f"Invalid FEN: {e}")
+            logger.error(f"Invalid FEN: {e}")
             return {"error": "Invalid FEN string"}
         
         try:
+            logger.debug("Starting Stockfish engine for position analysis")
             transport, engine = await chess.engine.popen_uci(self.stockfish_path)
             
             # Analyze the position
+            logger.debug(f"Analyzing position with depth={self.depth}, time_limit={self.time_limit}s")
             info = await engine.analyse(
                 board,
                 chess.engine.Limit(depth=self.depth, time=self.time_limit)
@@ -437,6 +468,8 @@ class AnalysisService:
             
             await engine.quit()
             
+            logger.debug(f"Position analysis complete: eval={evaluation}, best_move={best_move_san}, mate_in={mate_in}")
+            
             return {
                 "evaluation": evaluation,
                 "best_move": best_move_uci,
@@ -445,5 +478,5 @@ class AnalysisService:
             }
             
         except Exception as e:
-            print(f"Error analyzing position: {e}")
+            logger.exception(f"Error analyzing position: {e}")
             return {"error": str(e)}

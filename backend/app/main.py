@@ -3,6 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .database import engine, Base
 from .routers import auth, games, stats
+from .logging_config import setup_logging
+
+# Configure logging with datetime
+setup_logging()
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
