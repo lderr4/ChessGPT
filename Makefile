@@ -14,3 +14,5 @@ run-validation-tests:
 
 clear-analyses:
 	docker exec -it chess_analytics_api python -m scripts.clear_analyses
+clear-user-games:
+	docker exec -it chess_analytics_api python -m scripts.delete_user_games lderr4

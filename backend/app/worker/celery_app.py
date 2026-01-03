@@ -22,6 +22,12 @@ celery_app.conf.update(
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
+    # Task routing: send import tasks to imports queue, analysis tasks to celery (default) queue
+    task_routes={
+        'import_games_task': {'queue': 'imports'},
+        'analyze_game_task': {'queue': 'celery'},
+        'batch_analyze_games_task': {'queue': 'celery'},
+    },
 )
 
 # Tell Celery to look for tasks in app/tasks.py

@@ -84,6 +84,27 @@ services:
     # We will implement "app.worker" in the next layer.
     command: watchfiles --filter python "celery -A app.worker.celery_app.celery_app worker --loglevel=info --concurrency=4" # scale up to 4 workers (hard code for local dev)
 
+  # 3. THE IMPORT WORKER SERVICE
+  # Role: Consumer of Import Tasks, I/O Bound (Chess.com API)
+  # Concurrency=1 ensures only one import happens at a time globally (rate limiting)
+  import_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://chess_user:chess_password@postgres:5432/chess_analytics
+      REDIS_URL: redis://redis:6379/0
+      CHESS_COM_USER_AGENT: "ChessAnalytics/1.0 (contact: admin@chessanalytics.com)"
+      WATCHFILES_FORCE_POLLING: true
+    volumes:
+      - ./backend:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    command: watchfiles --filter python "celery -A app.worker.celery_app.celery_app worker --loglevel=info --concurrency=1 --queues=imports" # Only one import at a time
+
   frontend:
     build:
       context: ./frontend

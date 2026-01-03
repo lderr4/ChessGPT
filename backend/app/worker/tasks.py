@@ -1,12 +1,14 @@
 import asyncio
 import logging
 from datetime import datetime
+from typing import Optional
 from app.worker.celery_app import celery_app
 from app.services.analysis_service import AnalysisService
 from app.services.stats_service import StatsService
+from app.services.chess_com_service import ChessComService
 from app.services.redis_pubsub import redis_pubsub
 from app.database import SessionLocal
-from app.models import Game, Move, AnalysisJob
+from app.models import Game, Move, AnalysisJob, ImportJob, User
 from app.logging_config import setup_logging
 
 # Set up logging with datetime for Celery tasks
@@ -256,4 +258,145 @@ def batch_analyze_games_task(user_id: int, job_id: int):
         return f"Error in batch analysis job {job_id}: {str(e)}"
     finally:
         db.close()
+
+
+@celery_app.task(name="import_games_task")
+def import_games_task(
+    user_id: int,
+    chess_com_username: str,
+    job_id: int,
+    from_year: Optional[int] = None,
+    from_month: Optional[int] = None,
+    to_year: Optional[int] = None,
+    to_month: Optional[int] = None
+):
+    """
+    Celery task to import games from Chess.com API.
+    Uses concurrency=1 to ensure only one import happens at a time globally.
+    """
+    logger.info(f"Starting import task for user {user_id}, job {job_id}, username: {chess_com_username}")
+    db = SessionLocal()
+    start_time = datetime.utcnow()
+    
+    try:
+        # 1. Fetch the import job
+        job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
+        if not job:
+            logger.error(f"Import job {job_id} not found")
+            return f"Import job {job_id} not found"
+        
+        # 2. Update job status
+        job.status = "processing"
+        job.started_at = datetime.utcnow()
+        job.progress = 5
+        db.commit()
+        logger.info(f"Import job {job_id} marked as processing")
+        
+        # 3. Fetch games from Chess.com
+        logger.info(f"Fetching games from Chess.com for user {chess_com_username}")
+        chess_com_service = ChessComService()
+        job.progress = 10
+        db.commit()
+        
+        parsed_games = chess_com_service.fetch_and_parse_games(
+            chess_com_username,
+            from_year=from_year,
+            from_month=from_month,
+            to_year=to_year,
+            to_month=to_month
+        )
+        
+        job.total_games = len(parsed_games)
+        job.progress = 30
+        db.commit()
+        logger.info(f"Fetched {len(parsed_games)} games from Chess.com for job {job_id}")
+        
+        # 4. Get existing game IDs to avoid duplicates
+        existing_ids = {
+            game.chess_com_id 
+            for game in db.query(Game.chess_com_id).filter(Game.user_id == user_id).all()
+            if game.chess_com_id
+        }
+        logger.debug(f"Found {len(existing_ids)} existing games for user {user_id}")
+        
+        # 5. Import new games
+        new_games_count = 0
+        skipped_count = 0
+        for idx, game_data in enumerate(parsed_games):
+            chess_com_id = game_data.get("chess_com_id")
+            
+            # Skip if already imported
+            if chess_com_id and chess_com_id in existing_ids:
+                skipped_count += 1
+                continue
+            
+            # Create game record
+            new_game = Game(
+                user_id=user_id,
+                **game_data
+            )
+            db.add(new_game)
+            new_games_count += 1
+            existing_ids.add(chess_com_id)  # Add to set to prevent duplicates in same batch
+            
+            # Update progress periodically
+            if idx % 10 == 0 or idx == len(parsed_games) - 1:
+                job.imported_games = new_games_count
+                job.progress = 30 + int((idx / len(parsed_games)) * 50)
+                db.commit()
+                logger.debug(f"Import progress: {new_games_count} new games imported, {skipped_count} skipped ({job.progress}%)")
+        
+        db.commit()
+        
+        job.imported_games = new_games_count
+        job.progress = 85
+        db.commit()
+        logger.info(f"Imported {new_games_count} new games, skipped {skipped_count} duplicates for job {job_id}")
+        
+        # 6. Update user's last import time and current rating
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            user.last_import_at = datetime.utcnow()
+            # Get most recent game rating
+            latest_game = db.query(Game).filter(
+                Game.user_id == user_id,
+                Game.user_rating.isnot(None)
+            ).order_by(Game.date_played.desc()).first()
+            if latest_game:
+                user.current_rating = latest_game.user_rating
+            db.commit()
+            logger.debug(f"Updated user {user_id} last_import_at and current_rating")
+        
+        # 7. Recalculate stats
+        logger.debug(f"Recalculating user stats for user {user_id}")
+        StatsService.calculate_user_stats(db, user_id)
+        logger.debug(f"User stats recalculated for user {user_id}")
+        
+        # 8. Mark job as completed
+        job.status = "completed"
+        job.progress = 100
+        job.completed_at = datetime.utcnow()
+        db.commit()
+        
+        duration = (datetime.utcnow() - start_time).total_seconds()
+        logger.info(f"Import job {job_id} completed successfully in {duration:.2f}s: {new_games_count} games imported")
+        return f"Import job {job_id} completed: {new_games_count} games imported"
+        
+    except Exception as e:
+        db.rollback()
+        logger.exception(f"Exception occurred in import task for job {job_id}: {e}")
+        try:
+            job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
+            if job:
+                job.status = "failed"
+                job.error_message = str(e)
+                job.completed_at = datetime.utcnow()
+                db.commit()
+                logger.error(f"Import job {job_id} marked as failed: {str(e)}")
+        except Exception as e2:
+            logger.error(f"Error updating job status: {e2}")
+        return f"Error in import job {job_id}: {str(e)}"
+    finally:
+        db.close()
+        logger.debug(f"Database session closed for import job {job_id}")
 

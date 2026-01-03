@@ -24,117 +24,12 @@ from ..services.chess_com_service import ChessComService
 from ..services.analysis_service import AnalysisService
 from ..services.stats_service import StatsService
 from ..services.redis_pubsub import redis_pubsub
-from ..worker.tasks import analyze_game_task
+from ..worker.tasks import analyze_game_task, import_games_task
 
 logger = logging.getLogger(__name__)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
 
 router = APIRouter(prefix="/games", tags=["Games"])
-
-
-def import_games_background(
-    user_id: int, 
-    chess_com_username: str, 
-    job_id: int,
-    db: Session,
-    from_year: int = None,
-    from_month: int = None,
-    to_year: int = None,
-    to_month: int = None
-):
-    """Background task to import and analyze games"""
-    job = db.query(ImportJob).filter(ImportJob.id == job_id).first()
-    
-    try:
-        # Update job status
-        job.status = "processing"
-        job.started_at = datetime.utcnow()
-        job.progress = 5
-        db.commit()
-        
-        # Fetch games from Chess.com
-        chess_com_service = ChessComService()
-        job.progress = 10
-        db.commit()
-        
-        parsed_games = chess_com_service.fetch_and_parse_games(
-            chess_com_username,
-            from_year=from_year,
-            from_month=from_month,
-            to_year=to_year,
-            to_month=to_month
-        )
-        
-        job.total_games = len(parsed_games)
-        job.progress = 30
-        db.commit()
-        
-        # Get existing game IDs to avoid duplicates
-        existing_ids = {
-            game.chess_com_id 
-            for game in db.query(Game.chess_com_id).filter(Game.user_id == user_id).all()
-            if game.chess_com_id
-        }
-        
-        # Import new games
-        new_games_count = 0
-        for idx, game_data in enumerate(parsed_games):
-            chess_com_id = game_data.get("chess_com_id")
-            
-            # Skip if already imported
-            if chess_com_id and chess_com_id in existing_ids:
-                continue
-            
-            # Create game record
-            new_game = Game(
-                user_id=user_id,
-                **game_data
-            )
-            db.add(new_game)
-            new_games_count += 1
-            
-            # Update progress
-            if idx % 10 == 0:
-                job.imported_games = new_games_count
-                job.progress = 30 + int((idx / len(parsed_games)) * 50)
-                db.commit()
-        
-        db.commit()
-        
-        job.imported_games = new_games_count
-        job.progress = 85
-        db.commit()
-        
-        # Update user's last import time and current rating
-        user = db.query(User).filter(User.id == user_id).first()
-        if user:
-            user.last_import_at = datetime.utcnow()
-            # Get most recent game rating
-            latest_game = db.query(Game).filter(
-                Game.user_id == user_id,
-                Game.user_rating.isnot(None)
-            ).order_by(Game.date_played.desc()).first()
-            if latest_game:
-                user.current_rating = latest_game.user_rating
-            db.commit()
-        
-        # Recalculate stats
-        StatsService.calculate_user_stats(db, user_id)
-        
-        # Mark job as completed
-        job.status = "completed"
-        job.progress = 100
-        job.completed_at = datetime.utcnow()
-        db.commit()
-        
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Error importing games: {error_msg}")
-        job.status = "failed"
-        job.error_message = error_msg
-        job.completed_at = datetime.utcnow()
-        db.commit()
-        db.rollback()
 
 
 async def analyze_game_background(game_id: int):
@@ -230,16 +125,37 @@ async def analyze_game_background(game_id: int):
 
 @router.post("/import", status_code=202)
 def import_games(
-    background_tasks: BackgroundTasks,
     import_request: GameImportRequest = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Import games from Chess.com with optional date filtering"""
+    """
+    Import games from Chess.com with optional date filtering.
+    Uses Celery queue to ensure only one import happens at a time globally.
+    Includes idempotency check to prevent duplicate imports.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
     
     # Default import request if not provided
     if not import_request:
         import_request = GameImportRequest()
+    
+    # IDEMPOTENCY CHECK: Prevent duplicate imports if user already has a pending/processing job
+    existing_job = db.query(ImportJob).filter(
+        ImportJob.user_id == current_user.id,
+        ImportJob.status.in_(["pending", "processing"])
+    ).first()
+    
+    if existing_job:
+        logger.warning(
+            f"User {current_user.id} already has an active import job {existing_job.id} "
+            f"(status: {existing_job.status})"
+        )
+        raise HTTPException(
+            status_code=409,  # 409 Conflict
+            detail=f"You already have an import job in progress. Job #{existing_job.id} is currently {existing_job.status}."
+        )
     
     # Determine which Chess.com username to use
     chess_com_username = None
@@ -269,18 +185,19 @@ def import_games(
     db.commit()
     db.refresh(import_job)
     
-    # Start background import
-    background_tasks.add_task(
-        import_games_background, 
-        current_user.id, 
+    logger.info(f"Created import job {import_job.id} for user {current_user.id}, username: {chess_com_username}")
+    
+    # Dispatch to Celery queue (imports queue with concurrency=1)
+    task = import_games_task.delay(
+        current_user.id,
         chess_com_username,
         import_job.id,
-        db,
         from_year,
         from_month,
         to_year,
         to_month
     )
+    logger.info(f"Import task queued for job {import_job.id} with task_id={task.id}")
     
     date_range = ""
     if not import_request.import_all and (from_year or to_year):
@@ -288,7 +205,7 @@ def import_games(
     
     return {
         "job_id": import_job.id,
-        "message": f"Game import started{date_range}",
+        "message": f"Game import queued{date_range}",
         "status": "pending"
     }
 
