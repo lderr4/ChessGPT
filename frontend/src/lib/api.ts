@@ -72,6 +72,7 @@ export const authAPI = {
     username: string;
     password: string;
     chess_com_username?: string;
+    lichess_username?: string;
   }) => api.post("/auth/register", data),
 
   login: (data: { username: string; password: string }) =>
@@ -79,8 +80,10 @@ export const authAPI = {
 
   me: () => api.get("/auth/me"),
 
-  updateProfile: (data: { chess_com_username?: string }) =>
-    api.put("/auth/me", data),
+  updateProfile: (data: {
+    chess_com_username?: string;
+    lichess_username?: string;
+  }) => api.put("/auth/me", data),
 };
 
 // Games API
@@ -104,6 +107,15 @@ export const gamesAPI = {
     to_year?: number;
     to_month?: number;
   }) => api.post("/games/import", data),
+
+  importLichessGames: (data?: {
+    lichess_username?: string;
+    import_all?: boolean;
+    from_year?: number;
+    from_month?: number;
+    to_year?: number;
+    to_month?: number;
+  }) => api.post("/games/import/lichess", data),
 
   getImportStatus: (jobId: number) => api.get(`/games/import/status/${jobId}`),
 

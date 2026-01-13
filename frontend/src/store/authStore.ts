@@ -6,6 +6,7 @@ interface User {
   email: string
   username: string
   chess_com_username?: string
+  lichess_username?: string
   created_at: string
   last_import_at?: string
 }
@@ -19,7 +20,7 @@ interface AuthState {
   register: (email: string, username: string, password: string, chessComUsername?: string) => Promise<void>
   logout: () => void
   fetchUser: () => Promise<void>
-  updateProfile: (data: { chess_com_username?: string }) => Promise<void>
+  updateProfile: (data: { chess_com_username?: string; lichess_username?: string }) => Promise<void>
   clearError: () => void
 }
 
@@ -116,7 +117,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  updateProfile: async (data: { chess_com_username?: string }) => {
+  updateProfile: async (data: { chess_com_username?: string; lichess_username?: string }) => {
     try {
       const response = await authAPI.updateProfile(data)
       set({ user: response.data })

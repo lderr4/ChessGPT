@@ -40,7 +40,8 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
         email=user_data.email,
         username=user_data.username,
         hashed_password=hashed_password,
-        chess_com_username=user_data.chess_com_username
+        chess_com_username=user_data.chess_com_username,
+        lichess_username=user_data.lichess_username
     )
     
     db.add(new_user)
@@ -95,14 +96,17 @@ def get_current_user_info(current_user: User = Depends(get_current_user)):
 @router.put("/me", response_model=UserResponse)
 def update_current_user(
     chess_com_username: str = None,
+    lichess_username: str = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Update current user's Chess.com username"""
-    if chess_com_username:
+    """Update current user's Chess.com or Lichess username"""
+    if chess_com_username is not None:
         current_user.chess_com_username = chess_com_username
-        db.commit()
-        db.refresh(current_user)
+    if lichess_username is not None:
+        current_user.lichess_username = lichess_username
+    db.commit()
+    db.refresh(current_user)
     
     return current_user
 

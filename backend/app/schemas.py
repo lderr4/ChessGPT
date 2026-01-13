@@ -12,6 +12,7 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
     chess_com_username: Optional[str] = None
+    lichess_username: Optional[str] = None
 
 
 class UserLogin(BaseModel):
@@ -22,6 +23,7 @@ class UserLogin(BaseModel):
 class UserResponse(UserBase):
     id: int
     chess_com_username: Optional[str]
+    lichess_username: Optional[str]
     created_at: datetime
     last_import_at: Optional[datetime]
     current_rating: Optional[int]
@@ -79,6 +81,7 @@ class GameBase(BaseModel):
 class GameResponse(GameBase):
     id: int
     chess_com_url: Optional[str]
+    lichess_url: Optional[str]
     white_elo: Optional[int]
     black_elo: Optional[int]
     user_color: str
@@ -104,6 +107,7 @@ class GameDetailResponse(GameResponse):
 
 class GameImportRequest(BaseModel):
     chess_com_username: Optional[str] = None
+    lichess_username: Optional[str] = None
     from_year: Optional[int] = None  # e.g., 2023
     from_month: Optional[int] = None  # 1-12
     to_year: Optional[int] = None

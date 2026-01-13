@@ -19,6 +19,21 @@ how to analyze a chess game:
 - if you remember getting distracted, take note of that in the notation.
 - correct your blunders / mistakes without using the engine.
 
+
+Let us say you lost a game.
+So you made at least one mistake.
+Identify your mistakes.
+Identify your final, decisive mistake.
+What was the right move?
+Why?
+What candidate moves did you consider?
+Did you consider the right move?
+If yes, then why did you play the mistake?
+If no, why not?
+How much time did you think about your decisive mistake?
+How much time did you have available on your clock then?
+
+
 Game analysis:
 thedrunkpigeon vs ncforever
 Opening:
@@ -40,20 +55,5 @@ Endgame:
 	Completely winning. Then make one fatal error and lose. I saw that he was way ahead on time and started panicking a bit
 
 
-Goal: distribute the analyses across a cluster
 
-
-
-
-┌──────────┐      enqueue       ┌─────────┐
-│ Frontend │ ───────────────▶  │ Backend │
-└──────────┘                   └─────────┘
-                                      │
-                                      ▼
-                                Redis Queue
-                                      │
-                ┌─────────────────────┼─────────────────────┐
-                ▼                     ▼                     ▼
-         Worker 1               Worker 2               Worker k
-        (Stockfish)            (Stockfish)            (Stockfish)
 

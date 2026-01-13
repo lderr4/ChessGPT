@@ -12,6 +12,7 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     chess_com_username = Column(String, nullable=True)
+    lichess_username = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_import_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -33,6 +34,8 @@ class Game(Base):
     # Game metadata
     chess_com_url = Column(String, nullable=True)
     chess_com_id = Column(String, unique=True, index=True, nullable=True)
+    lichess_url = Column(String, nullable=True)
+    lichess_id = Column(String, unique=True, index=True, nullable=True)
     pgn = Column(Text, nullable=False)
     
     # Players

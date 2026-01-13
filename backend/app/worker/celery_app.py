@@ -25,6 +25,7 @@ celery_app.conf.update(
     # Task routing: send import tasks to imports queue, analysis tasks to celery (default) queue
     task_routes={
         'import_games_task': {'queue': 'imports'},
+        'import_lichess_games_task': {'queue': 'imports'},
         'analyze_game_task': {'queue': 'celery'},
         'batch_analyze_games_task': {'queue': 'celery'},
     },

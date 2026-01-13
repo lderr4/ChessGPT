@@ -24,7 +24,7 @@ from ..services.chess_com_service import ChessComService
 from ..services.analysis_service import AnalysisService
 from ..services.stats_service import StatsService
 from ..services.redis_pubsub import redis_pubsub
-from ..worker.tasks import analyze_game_task, import_games_task
+from ..worker.tasks import analyze_game_task, import_games_task, import_lichess_games_task
 
 logger = logging.getLogger(__name__)
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
@@ -206,6 +206,92 @@ def import_games(
     return {
         "job_id": import_job.id,
         "message": f"Game import queued{date_range}",
+        "status": "pending"
+    }
+
+
+@router.post("/import/lichess", status_code=202)
+def import_lichess_games(
+    import_request: GameImportRequest = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Import games from Lichess.org with optional date filtering.
+    Uses Celery queue to ensure only one import happens at a time globally.
+    Includes idempotency check to prevent duplicate imports.
+    """
+    logger.info(f"Lichess import request from user {current_user.id}")
+    
+    # Default import request if not provided
+    if not import_request:
+        import_request = GameImportRequest()
+    
+    # IDEMPOTENCY CHECK: Prevent duplicate imports if user already has a pending/processing job
+    existing_job = db.query(ImportJob).filter(
+        ImportJob.user_id == current_user.id,
+        ImportJob.status.in_(["pending", "processing"])
+    ).first()
+    
+    if existing_job:
+        logger.warning(
+            f"User {current_user.id} already has an active import job {existing_job.id} "
+            f"(status: {existing_job.status})"
+        )
+        raise HTTPException(
+            status_code=409,  # 409 Conflict
+            detail=f"You already have an import job in progress. Job #{existing_job.id} is currently {existing_job.status}."
+        )
+    
+    # Determine which Lichess username to use
+    lichess_username = None
+    if import_request.lichess_username:
+        lichess_username = import_request.lichess_username
+    elif current_user.lichess_username:
+        lichess_username = current_user.lichess_username
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="No Lichess username provided. Please set one in your profile or provide it in the request."
+        )
+    
+    # Extract date parameters
+    from_year = None if import_request.import_all else import_request.from_year
+    from_month = None if import_request.import_all else import_request.from_month
+    to_year = None if import_request.import_all else import_request.to_year
+    to_month = None if import_request.import_all else import_request.to_month
+    
+    # Create import job
+    import_job = ImportJob(
+        user_id=current_user.id,
+        status="pending",
+        progress=0
+    )
+    db.add(import_job)
+    db.commit()
+    db.refresh(import_job)
+    
+    logger.info(f"Created Lichess import job {import_job.id} for user {current_user.id}, username: {lichess_username}")
+    
+    # Dispatch to Celery queue (imports queue with concurrency=1)
+    task = import_lichess_games_task.delay(
+        current_user.id,
+        lichess_username,
+        import_job.id,
+        from_year,
+        from_month,
+        to_year,
+        to_month
+    )
+    logger.info(f"Lichess import task queued for job {import_job.id} with task_id={task.id}")
+    
+    date_range = ""
+    if not import_request.import_all and (from_year or to_year):
+        date_range = f" from {from_year or 'start'}/{from_month or 1} to {to_year or 'present'}/{to_month or 12}"
+    
+    return {
+        "job_id": import_job.id,
+        "message": f"Lichess game import queued{date_range}",
         "status": "pending"
     }
 
