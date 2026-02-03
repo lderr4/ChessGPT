@@ -6,7 +6,8 @@ import {
   BarChart3, 
   BookOpen, 
   User, 
-  LogOut 
+  LogOut,
+  Target
 } from 'lucide-react'
 
 const Layout = () => {
@@ -22,6 +23,7 @@ const Layout = () => {
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/games', label: 'Games', icon: GamepadIcon },
+    { path: '/puzzles', label: 'Puzzles', icon: Target },
     { path: '/statistics', label: 'Statistics', icon: BarChart3 },
     { path: '/openings', label: 'Openings', icon: BookOpen },
     { path: '/profile', label: 'Profile', icon: User },

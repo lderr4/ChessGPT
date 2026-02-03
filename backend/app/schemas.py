@@ -122,6 +122,26 @@ class GameImportProgress(BaseModel):
     message: str
 
 
+# Puzzle Schemas
+class PuzzleLastMove(BaseModel):
+    from_square: str
+    to_square: str
+
+
+class PuzzleResponse(BaseModel):
+    puzzle_id: str
+    fen: str
+    solution_uci: str
+    game_id: int
+    user_color: str  # 'white' or 'black' - orient board so user's pieces are at bottom
+    last_move: Optional[PuzzleLastMove] = None  # previous move for highlighting
+    date_played: Optional[str] = None  # ISO format
+    white_player: Optional[str] = None
+    black_player: Optional[str] = None
+    white_elo: Optional[int] = None
+    black_elo: Optional[int] = None
+
+
 # Statistics Schemas
 class UserStatsResponse(BaseModel):
     total_games: int

@@ -9,6 +9,7 @@ import GameViewer from './pages/GameViewer'
 import Statistics from './pages/Statistics'
 import Openings from './pages/Openings'
 import Profile from './pages/Profile'
+import Puzzles from './pages/Puzzles'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function App() {
@@ -24,6 +25,7 @@ function App() {
           <Route path="/games/:gameId" element={<GameViewer />} />
           <Route path="/statistics" element={<Statistics />} />
           <Route path="/openings" element={<Openings />} />
+          <Route path="/puzzles" element={<Puzzles />} />
           <Route path="/profile" element={<Profile />} />
         </Route>
         

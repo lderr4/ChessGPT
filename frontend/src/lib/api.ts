@@ -159,3 +159,8 @@ export const statsAPI = {
 
   getPerformanceByPhase: () => api.get("/stats/performance-by-phase"),
 };
+
+// Puzzles API
+export const puzzlesAPI = {
+  getNextPuzzle: () => api.get("/puzzles/next"),
+};

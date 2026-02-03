@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .database import engine, Base
-from .routers import auth, games, stats
+from .routers import auth, games, stats, puzzles
 from .logging_config import setup_logging
 from .schema_migrations import ensure_lichess_columns
 
@@ -36,6 +36,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api")
 app.include_router(games.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
+app.include_router(puzzles.router, prefix="/api")
 
 
 @app.get("/")
