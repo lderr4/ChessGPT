@@ -491,14 +491,21 @@ const Games = () => {
             `Click OK to cancel the old job and start fresh, or Cancel to wait.`
         );
 
-        if (shouldCancel && stuckJobId) {
+        if (shouldCancel) {
           try {
-            await gamesAPI.cancelAnalysisJob(stuckJobId);
+            await gamesAPI.cancelAnalysisJob(stuckJobId ?? undefined);
             alert("✅ Old job cancelled! You can now start a new analysis.");
             // Automatically retry
             handleBatchAnalysis();
             return;
-          } catch (cancelError) {
+          } catch (cancelError: any) {
+            const cancelStatus = cancelError?.response?.status;
+            // 404 = job already gone, 400 = already completed/cancelled
+            if (cancelStatus === 404 || cancelStatus === 400) {
+              alert("✅ Job is no longer active. Starting fresh analysis.");
+              handleBatchAnalysis();
+              return;
+            }
             console.error("Failed to cancel job:", cancelError);
             alert(
               "Failed to cancel the old job. Please refresh the page and try again."
@@ -569,8 +576,8 @@ const Games = () => {
         </div>
       )}
 
-      {/* Analysis Status Banner */}
-      {analyzingGameIds.size > 0 && (
+      {/* Analysis Status Banner - only show when NOT in batch mode (batch has its own purple banner) */}
+      {analyzingGameIds.size > 0 && !isBatchAnalyzing && (
         <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center gap-3">
           <Loader2 size={20} className="animate-spin text-blue-600" />
           <div>

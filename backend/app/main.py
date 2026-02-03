@@ -4,6 +4,7 @@ from .config import settings
 from .database import engine, Base
 from .routers import auth, games, stats
 from .logging_config import setup_logging
+from .schema_migrations import ensure_lichess_columns
 
 # Configure logging with datetime
 setup_logging()
@@ -16,6 +17,11 @@ app = FastAPI(
     description="API for chess game analytics and statistics",
     version="1.0.0"
 )
+
+
+@app.on_event("startup")
+def run_startup_migrations() -> None:
+    ensure_lichess_columns(engine)
 
 # Configure CORS
 app.add_middleware(

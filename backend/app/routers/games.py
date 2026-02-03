@@ -382,6 +382,7 @@ def get_game(
     game_dict = {
         "id": game.id,
         "chess_com_url": game.chess_com_url,
+        "lichess_url": game.lichess_url,
         "white_player": game.white_player,
         "black_player": game.black_player,
         "white_elo": game.white_elo,
@@ -547,6 +548,78 @@ def get_analysis_status(
         "created_at": job.created_at,
         "started_at": job.started_at,
         "completed_at": job.completed_at
+    }
+
+
+@router.post("/analyze/cancel")
+def cancel_active_analysis_job(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Cancel any active analysis job for the current user (when job ID is unknown)."""
+    existing_job = db.query(AnalysisJob).filter(
+        AnalysisJob.user_id == current_user.id,
+        AnalysisJob.status.in_(["pending", "processing"])
+    ).first()
+    
+    if not existing_job:
+        raise HTTPException(
+            status_code=404,
+            detail="No active analysis job found"
+        )
+    
+    return _do_cancel_job(db, current_user, existing_job.id)
+
+
+@router.post("/analyze/cancel/{job_id}")
+def cancel_analysis_job(
+    job_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Cancel a stuck or in-progress analysis job by ID (e.g. after server restart)."""
+    return _do_cancel_job(db, current_user, job_id)
+
+
+def _do_cancel_job(db: Session, current_user: User, job_id: int):
+    """Shared logic to cancel an analysis job and reset stuck games."""
+    
+    job = db.query(AnalysisJob).filter(
+        AnalysisJob.id == job_id,
+        AnalysisJob.user_id == current_user.id
+    ).first()
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Analysis job not found")
+    
+    if job.status not in ("pending", "processing"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job is already {job.status}, cannot cancel"
+        )
+    
+    # Mark job as cancelled
+    job.status = "cancelled"
+    job.completed_at = datetime.utcnow()
+    job.error_message = "Cancelled by user"
+    
+    # Reset games stuck in in_progress so they can be re-analyzed
+    stuck_count = db.query(Game).filter(
+        Game.user_id == current_user.id,
+        Game.analysis_state == "in_progress"
+    ).update({"analysis_state": "unanalyzed"}, synchronize_session=False)
+    
+    db.commit()
+    
+    logger.info(
+        f"Cancelled analysis job {job_id} for user {current_user.id}, "
+        f"reset {stuck_count} stuck games to unanalyzed"
+    )
+    
+    return {
+        "message": "Job cancelled",
+        "job_id": job_id,
+        "reset_games": stuck_count
     }
 
 

@@ -129,8 +129,10 @@ export const gamesAPI = {
   getAnalysisStatus: (jobId: number) =>
     api.get(`/games/analyze/status/${jobId}`),
 
-  cancelAnalysisJob: (jobId: number) =>
-    api.post(`/games/analyze/cancel/${jobId}`),
+  cancelAnalysisJob: (jobId?: number) =>
+    jobId != null
+      ? api.post(`/games/analyze/cancel/${jobId}`)
+      : api.post("/games/analyze/cancel"),
 
   deleteGame: (gameId: number) => api.delete(`/games/${gameId}`),
 };
