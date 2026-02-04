@@ -1,18 +1,24 @@
 """
 Puzzle service: derives puzzle positions from analyzed game moves.
-Each puzzle is a position where the user made a mistake; the solution is the engine's best move.
+Each puzzle is a position where the user made a mistake; the solution comes from deep engine analysis.
+Uses on-demand deep analysis with multipv to find one or more valid solutions.
 """
+import asyncio
 import chess
 import chess.pgn
+import chess.engine
+import json
 import logging
 from io import StringIO
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 
-from ..models import Game, Move
+from ..models import Game, Move, PuzzleAnalysisCache
+from ..config import settings
 
 logger = logging.getLogger(__name__)
+
 
 
 def fen_from_pgn_at_half_move(pgn_string: str, half_move: int) -> Optional[str]:
@@ -49,6 +55,90 @@ def fen_from_pgn_at_half_move(pgn_string: str, half_move: int) -> Optional[str]:
         return board.fen()
     except Exception as e:
         logger.warning(f"Failed to derive FEN from PGN at half_move {half_move}: {e}")
+        return None
+
+
+def _get_evaluation_cp(score) -> Optional[float]:
+    """Extract centipawn evaluation from engine score (side to move perspective)."""
+    if not score:
+        return None
+    if score.is_mate():
+        mate_in = score.relative.mate()
+        if mate_in > 0:
+            return 10000 - mate_in * 100
+        return -10000 - mate_in * 100
+    cp = score.relative.cp
+    return float(cp) if cp is not None else None
+
+
+async def _deep_analyze_position(fen: str) -> Optional[List[str]]:
+    """
+    Run deep multipv analysis on a position. Returns list of valid solution UCI moves.
+    Moves within MULTIPV_THRESHOLD_CP of the best are considered correct.
+    """
+    try:
+        board = chess.Board(fen)
+    except Exception as e:
+        logger.warning(f"Invalid FEN for puzzle analysis: {e}")
+        return None
+
+    try:
+        transport, engine = await chess.engine.popen_uci(settings.STOCKFISH_PATH)
+        limit = chess.engine.Limit(
+            depth=settings.PUZZLE_ANALYSIS_DEPTH,
+            time=settings.PUZZLE_ANALYSIS_TIME,
+        )
+
+        # multipv=5: engine returns list of InfoDict (one per line) in python-chess
+        result = await engine.analyse(board, limit, multipv=5)
+        await engine.quit()
+
+        # Handle both list (multipv>1) and single dict (fallback)
+        if isinstance(result, list):
+            infos = result
+        elif result:
+            infos = [result]
+        else:
+            infos = []
+
+        if not infos:
+            return None
+
+        lines = []
+        for info in infos:
+            pv = info.get("pv", [])
+            score = info.get("score")
+            if not pv:
+                continue
+            move_uci = pv[0].uci()
+            eval_cp = _get_evaluation_cp(score)
+            lines.append({"move": move_uci, "eval": eval_cp})
+
+        if not lines:
+            return None
+
+        # Dedupe by move (keep first occurrence = best)
+        seen = set()
+        unique_lines = []
+        for line in lines:
+            if line["move"] not in seen:
+                seen.add(line["move"])
+                unique_lines.append(line)
+
+        best_eval = unique_lines[0]["eval"]
+        solutions = []
+        for line in unique_lines:
+            line_eval = line["eval"]
+            if best_eval is None or line_eval is None:
+                solutions.append(line["move"])
+            elif abs(best_eval - line_eval) <= settings.PUZZLE_MULTIPV_SOLUTION_THRESHOLD_CP:
+                solutions.append(line["move"])
+            else:
+                break
+
+        return solutions if solutions else [unique_lines[0]["move"]]
+    except Exception as e:
+        logger.exception(f"Deep puzzle analysis failed: {e}")
         return None
 
 
@@ -97,7 +187,7 @@ def get_puzzle_candidates(db: Session, user_id: int) -> List[Dict[str, Any]]:
 
 def get_next_puzzle(db: Session, user_id: int) -> Optional[Dict[str, Any]]:
     """
-    Pick a random puzzle candidate, compute its FEN, and return puzzle data.
+    Pick a random puzzle candidate, run deep analysis (or use cache), return puzzle data.
     """
     import random
 
@@ -105,45 +195,84 @@ def get_next_puzzle(db: Session, user_id: int) -> Optional[Dict[str, Any]]:
     if not candidates:
         return None
 
-    # Shuffle and try until we get a valid FEN
     random.shuffle(candidates)
     for candidate in candidates:
         fen = fen_from_pgn_at_half_move(candidate["pgn"], candidate["half_move"])
-        if fen:
-            # Get the previous move (the move that led to this position) for highlighting
-            last_move = None
-            if candidate["half_move"] > 0:
-                prev_move = (
-                    db.query(Move)
-                    .filter(
-                        Move.game_id == candidate["game_id"],
-                        Move.half_move == candidate["half_move"] - 1,
-                    )
-                    .first()
-                )
-                if prev_move and prev_move.move_uci and len(prev_move.move_uci) >= 4:
-                    last_move = {
-                        "from_square": prev_move.move_uci[:2],
-                        "to_square": prev_move.move_uci[2:4],
-                    }
+        if not fen:
+            logger.debug(
+                f"Skipping candidate game {candidate['game_id']} move {candidate['move_id']}: "
+                "FEN derivation failed"
+            )
+            continue
 
-            return {
-                "puzzle_id": f"{candidate['game_id']}_{candidate['move_id']}",
-                "fen": fen,
-                "solution_uci": candidate["best_move_uci"],
-                "game_id": candidate["game_id"],
-                "move_id": candidate["move_id"],
-                "user_color": candidate["user_color"],
-                "last_move": last_move,
-                "date_played": candidate["date_played"].isoformat() if candidate["date_played"] else None,
-                "white_player": candidate["white_player"],
-                "black_player": candidate["black_player"],
-                "white_elo": candidate["white_elo"],
-                "black_elo": candidate["black_elo"],
-            }
-        logger.debug(
-            f"Skipping candidate game {candidate['game_id']} move {candidate['move_id']}: "
-            "FEN derivation failed"
+        game_id = candidate["game_id"]
+        move_id = candidate["move_id"]
+
+        # Check cache first
+        cached = (
+            db.query(PuzzleAnalysisCache)
+            .filter(
+                PuzzleAnalysisCache.game_id == game_id,
+                PuzzleAnalysisCache.move_id == move_id,
+            )
+            .first()
         )
+
+        if cached:
+            solution_list = json.loads(cached.solution_uci_list)
+        else:
+            # Run deep analysis (blocking call from sync context)
+            solution_list = asyncio.run(_deep_analyze_position(fen))
+            if not solution_list:
+                logger.debug(
+                    f"Deep analysis returned no solutions for game {game_id} move {move_id}"
+                )
+                continue
+
+            # Cache the result
+            try:
+                cache_entry = PuzzleAnalysisCache(
+                    game_id=game_id,
+                    move_id=move_id,
+                    solution_uci_list=json.dumps(solution_list),
+                )
+                db.add(cache_entry)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"Failed to cache puzzle analysis: {e}")
+
+        # Get the previous move for highlighting
+        last_move = None
+        if candidate["half_move"] > 0:
+            prev_move = (
+                db.query(Move)
+                .filter(
+                    Move.game_id == game_id,
+                    Move.half_move == candidate["half_move"] - 1,
+                )
+                .first()
+            )
+            if prev_move and prev_move.move_uci and len(prev_move.move_uci) >= 4:
+                last_move = {
+                    "from_square": prev_move.move_uci[:2],
+                    "to_square": prev_move.move_uci[2:4],
+                }
+
+        return {
+            "puzzle_id": f"{game_id}_{move_id}",
+            "fen": fen,
+            "solution_uci": solution_list[0],
+            "solution_uci_list": solution_list,
+            "game_id": game_id,
+            "move_id": move_id,
+            "user_color": candidate["user_color"],
+            "last_move": last_move,
+            "date_played": candidate["date_played"].isoformat() if candidate["date_played"] else None,
+            "white_player": candidate["white_player"],
+            "black_player": candidate["black_player"],
+            "white_elo": candidate["white_elo"],
+            "black_elo": candidate["black_elo"],
+        }
 
     return None

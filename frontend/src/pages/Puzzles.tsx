@@ -9,6 +9,7 @@ interface Puzzle {
   puzzle_id: string;
   fen: string;
   solution_uci: string;
+  solution_uci_list: string[];
   game_id: number;
   user_color: string;
   last_move?: { from_square: string; to_square: string };
@@ -85,9 +86,12 @@ const Puzzles = () => {
     if (!move) return false;
 
     const userUci = moveToUCI(sourceSquare, targetSquare, move.promotion);
-    const solutionUci = puzzle.solution_uci.toLowerCase();
+    const solutions = puzzle.solution_uci_list?.map((s) => s.toLowerCase()) ?? [
+      puzzle.solution_uci.toLowerCase(),
+    ];
+    const isCorrect = solutions.includes(userUci);
 
-    if (userUci === solutionUci) {
+    if (isCorrect) {
       setPosition(chess.fen());
       setLastResult("correct");
       setSolvedThisSession((n) => n + 1);
@@ -105,6 +109,9 @@ const Puzzles = () => {
       <div className="flex flex-col items-center justify-center min-h-[400px]">
         <Loader2 size={48} className="animate-spin text-primary-600 mb-4" />
         <p className="text-gray-600">Loading puzzle...</p>
+        <p className="text-sm text-gray-400 mt-2">
+          First load may take a few seconds while the position is analyzed.
+        </p>
       </div>
     );
   }

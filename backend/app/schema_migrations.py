@@ -32,3 +32,29 @@ def ensure_lichess_columns(engine) -> None:
                     "ON games(user_id, lichess_id) WHERE lichess_id IS NOT NULL"
                 )
             )
+
+
+def ensure_puzzle_analysis_cache(engine) -> None:
+    """Create puzzle_analysis_cache table if it doesn't exist."""
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        if "puzzle_analysis_cache" not in inspector.get_table_names():
+            # Use dialect-appropriate syntax (PostgreSQL SERIAL vs SQLite INTEGER)
+            dialect = engine.dialect.name
+            if dialect == "sqlite":
+                id_col = "id INTEGER PRIMARY KEY AUTOINCREMENT"
+            else:
+                id_col = "id SERIAL PRIMARY KEY"
+            connection.execute(text(f"""
+                CREATE TABLE puzzle_analysis_cache (
+                    {id_col},
+                    game_id INTEGER NOT NULL REFERENCES games(id),
+                    move_id INTEGER NOT NULL REFERENCES moves(id),
+                    solution_uci_list TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(game_id, move_id)
+                )
+            """))
+            connection.execute(
+                text("CREATE UNIQUE INDEX ix_puzzle_cache_game_move ON puzzle_analysis_cache(game_id, move_id)")
+            )

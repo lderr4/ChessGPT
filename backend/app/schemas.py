@@ -131,7 +131,8 @@ class PuzzleLastMove(BaseModel):
 class PuzzleResponse(BaseModel):
     puzzle_id: str
     fen: str
-    solution_uci: str
+    solution_uci: str  # Primary solution (first/best)
+    solution_uci_list: List[str]  # All valid solutions from deep analysis
     game_id: int
     user_color: str  # 'white' or 'black' - orient board so user's pieces are at bottom
     last_move: Optional[PuzzleLastMove] = None  # previous move for highlighting

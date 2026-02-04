@@ -4,7 +4,7 @@ from .config import settings
 from .database import engine, Base
 from .routers import auth, games, stats, puzzles
 from .logging_config import setup_logging
-from .schema_migrations import ensure_lichess_columns
+from .schema_migrations import ensure_lichess_columns, ensure_puzzle_analysis_cache
 
 # Configure logging with datetime
 setup_logging()
@@ -22,6 +22,7 @@ app = FastAPI(
 @app.on_event("startup")
 def run_startup_migrations() -> None:
     ensure_lichess_columns(engine)
+    ensure_puzzle_analysis_cache(engine)
 
 # Configure CORS
 app.add_middleware(

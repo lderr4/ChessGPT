@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     STOCKFISH_PATH: str = "/usr/games/stockfish"
     STOCKFISH_DEPTH: int = 18
     STOCKFISH_TIME_LIMIT: float = 0.8
+
+    # Puzzle deep analysis (on-demand, higher depth for quality)
+    PUZZLE_ANALYSIS_DEPTH: int = 22
+    PUZZLE_ANALYSIS_TIME: float = 3.0
+    PUZZLE_MULTIPV_SOLUTION_THRESHOLD_CP: int = 50  # Moves within this CP of best are valid
     
     # AI Chess Coach
     ENABLE_COACH: bool = False

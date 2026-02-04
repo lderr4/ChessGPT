@@ -217,3 +217,24 @@ class AnalysisJob(Base):
     # Relationships
     user = relationship("User")
 
+
+class PuzzleAnalysisCache(Base):
+    """
+    Cache for deep puzzle analysis. Keyed by game_id + move_id.
+    Stores valid solution moves from multipv analysis.
+    """
+    __tablename__ = "puzzle_analysis_cache"
+
+    id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(Integer, ForeignKey("games.id"), nullable=False, index=True)
+    move_id = Column(Integer, ForeignKey("moves.id"), nullable=False, index=True)
+
+    # JSON array of UCI moves that are valid solutions, e.g. ["e2e4"] or ["e2e4", "d2d4"]
+    solution_uci_list = Column(Text, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_puzzle_cache_game_move", "game_id", "move_id", unique=True),
+    )
+
