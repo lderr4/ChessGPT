@@ -27,18 +27,27 @@ const Puzzles = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [solvedThisSession, setSolvedThisSession] = useState(0);
-  const [lastResult, setLastResult] = useState<"correct" | "wrong" | null>(null);
+  const [lastResult, setLastResult] = useState<"correct" | "wrong" | null>(
+    null,
+  );
   const [boardKey, setBoardKey] = useState(0);
   const [puzzleHistory, setPuzzleHistory] = useState<Puzzle[]>([]);
   const [viewingIndex, setViewingIndex] = useState<number | null>(null);
-  const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
-  const [activeArrowQuestion, setActiveArrowQuestion] = useState<string | null>(null);
+  const [questionAnswers, setQuestionAnswers] = useState<
+    Record<string, string>
+  >({});
+  const [activeArrowQuestion, setActiveArrowQuestion] = useState<string | null>(
+    null,
+  );
   const [arrowFromSquare, setArrowFromSquare] = useState<string | null>(null);
-  const [arrowsByQuestion, setArrowsByQuestion] = useState<Record<string, Array<[string, string]>>>({});
+  const [arrowsByQuestion, setArrowsByQuestion] = useState<
+    Record<string, Array<[string, string]>>
+  >({});
 
-  const displayPuzzle = viewingIndex !== null ? puzzleHistory[viewingIndex] : puzzle;
+  const displayPuzzle =
+    viewingIndex !== null ? puzzleHistory[viewingIndex] : puzzle;
   const canMakeMove = PUZZLE_QUESTIONS.every(
-    (q) => (questionAnswers[q.id] ?? "").trim().length > 0
+    (q) => (questionAnswers[q.id] ?? "").trim().length > 0,
   );
 
   const setAnswer = (questionId: string, value: string) => {
@@ -66,7 +75,7 @@ const Puzzles = () => {
       setError(
         typeof detail === "string"
           ? detail
-          : "Failed to load puzzle. Analyze more games to unlock puzzles from your mistakes."
+          : "Failed to load puzzle. Analyze more games to unlock puzzles from your mistakes.",
       );
       setPuzzle(null);
     } finally {
@@ -101,7 +110,7 @@ const Puzzles = () => {
   const moveToUCI = (
     sourceSquare: string,
     targetSquare: string,
-    promotion?: string
+    promotion?: string,
   ): string => {
     let uci = sourceSquare + targetSquare;
     if (promotion) {
@@ -113,14 +122,15 @@ const Puzzles = () => {
   const getMoveSanAndValidate = (
     from: string,
     to: string,
-    arrowMode: "checks" | "captures" | "attacks"
+    arrowMode: "checks" | "captures" | "attacks",
   ): string | null => {
     try {
       const chess = new Chess(position);
       const piece = chess.get(from);
       const isPromotion =
         piece?.type === "p" &&
-        ((piece.color === "w" && to[1] === "8") || (piece.color === "b" && to[1] === "1"));
+        ((piece.color === "w" && to[1] === "8") ||
+          (piece.color === "b" && to[1] === "1"));
       const move = chess.move({
         from,
         to,
@@ -144,14 +154,18 @@ const Puzzles = () => {
     (arrows: Array<[string, string, string?]>) => {
       if (!activeArrowQuestion || !displayPuzzle) return;
 
-      const question = PUZZLE_QUESTIONS.find((q) => q.id === activeArrowQuestion);
+      const question = PUZZLE_QUESTIONS.find(
+        (q) => q.id === activeArrowQuestion,
+      );
       if (!question?.arrowMode) return;
 
       const knownArrows = new Set(
-        (arrowsByQuestion[activeArrowQuestion] ?? []).map(([f, t]) => `${f}-${t}`)
+        (arrowsByQuestion[activeArrowQuestion] ?? []).map(
+          ([f, t]) => `${f}-${t}`,
+        ),
       );
       const newArrows = arrows.filter(
-        ([from, to]) => from !== to && !knownArrows.has(`${from}-${to}`)
+        ([from, to]) => from !== to && !knownArrows.has(`${from}-${to}`),
       );
 
       const validMoves: Array<{ from: string; to: string; san: string }> = [];
@@ -166,7 +180,7 @@ const Puzzles = () => {
         const current = questionAnswers[activeArrowQuestion] ?? "";
         const newText = validMoves.reduce(
           (acc, { san }) => (acc ? `${acc}, ${san}` : san),
-          current.trim()
+          current.trim(),
         );
         setAnswer(activeArrowQuestion, newText);
         setArrowsByQuestion((prev) => ({
@@ -184,7 +198,7 @@ const Puzzles = () => {
       arrowsByQuestion,
       questionAnswers,
       position,
-    ]
+    ],
   );
 
   const onSquareClick = (square: string) => {
@@ -208,16 +222,21 @@ const Puzzles = () => {
       return;
     }
 
-    const san = getMoveSanAndValidate(arrowFromSquare, square, question.arrowMode);
+    const san = getMoveSanAndValidate(
+      arrowFromSquare,
+      square,
+      question.arrowMode,
+    );
     if (san) {
       const current = questionAnswers[activeArrowQuestion] ?? "";
-      const newText = current.trim()
-        ? `${current}, ${san}`
-        : san;
+      const newText = current.trim() ? `${current}, ${san}` : san;
       setAnswer(activeArrowQuestion, newText);
       setArrowsByQuestion((prev) => ({
         ...prev,
-        [activeArrowQuestion]: [...(prev[activeArrowQuestion] ?? []), [arrowFromSquare, square]],
+        [activeArrowQuestion]: [
+          ...(prev[activeArrowQuestion] ?? []),
+          [arrowFromSquare, square],
+        ],
       }));
     }
     setArrowFromSquare(null);
@@ -241,9 +260,9 @@ const Puzzles = () => {
     if (!move) return false;
 
     const userUci = moveToUCI(sourceSquare, targetSquare, move.promotion);
-    const solutions = displayPuzzle.solution_uci_list?.map((s) => s.toLowerCase()) ?? [
-      displayPuzzle.solution_uci.toLowerCase(),
-    ];
+    const solutions = displayPuzzle.solution_uci_list?.map((s) =>
+      s.toLowerCase(),
+    ) ?? [displayPuzzle.solution_uci.toLowerCase()];
     const isCorrect = solutions.includes(userUci);
 
     if (isCorrect) {
@@ -310,15 +329,13 @@ const Puzzles = () => {
               <label
                 htmlFor={q.id}
                 className={`text-sm font-medium text-gray-700 ${
-                  q.arrowMode
-                    ? "cursor-pointer hover:text-primary-600"
-                    : ""
+                  q.arrowMode ? "cursor-pointer hover:text-primary-600" : ""
                 } ${activeArrowQuestion === q.id ? "text-primary-600 font-semibold" : ""}`}
                 onClick={
                   q.arrowMode
                     ? () =>
                         setActiveArrowQuestion((prev) =>
-                          prev === q.id ? null : q.id
+                          prev === q.id ? null : q.id,
                         )
                     : undefined
                 }
@@ -338,6 +355,15 @@ const Puzzles = () => {
                 rows={2}
                 className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
               />
+              {q.noOptionLabel && (
+                <button
+                  type="button"
+                  onClick={() => setAnswer(q.id, q.noOptionLabel!)}
+                  className="text-xs text-primary-600 hover:text-primary-700 hover:underline"
+                >
+                  {q.noOptionLabel}
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -349,143 +375,157 @@ const Puzzles = () => {
       </aside>
 
       <div className="flex-1 min-w-0">
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Puzzles</h1>
-        <div className="flex items-center gap-4">
-          <span className="text-sm font-medium text-gray-600">
-            Solved this session: {solvedThisSession}
-          </span>
-          <button
-            onClick={fetchPuzzle}
-            className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
-          >
-            <RotateCcw size={18} />
-            Skip
-          </button>
-        </div>
-      </div>
-
-      <p className="text-gray-600 mb-6">
-        Find the best move from positions in your analyzed games. These are
-        positions where you played a mistake or blunder.
-      </p>
-
-      {displayPuzzle && (displayPuzzle.date_played || displayPuzzle.white_player || displayPuzzle.black_player) && (
-        <div className="mb-6 p-4 bg-white rounded-xl shadow-sm border border-gray-200 max-w-md mx-auto">
-          {displayPuzzle.date_played && (
-            <p className="text-sm text-gray-500 mb-2">
-              {new Date(displayPuzzle.date_played).toLocaleDateString(undefined, {
-                weekday: "short",
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-              })}
-            </p>
-          )}
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex-1 text-right">
-              <span className="font-medium text-gray-900">
-                {displayPuzzle.white_player || "White"}
-              </span>
-              {displayPuzzle.white_elo != null && (
-                <span className="ml-2 text-gray-500">({displayPuzzle.white_elo})</span>
-              )}
-            </div>
-            <span className="text-gray-400 font-medium">vs</span>
-            <div className="flex-1 text-left">
-              <span className="font-medium text-gray-900">
-                {displayPuzzle.black_player || "Black"}
-              </span>
-              {displayPuzzle.black_elo != null && (
-                <span className="ml-2 text-gray-500">({displayPuzzle.black_elo})</span>
-              )}
-            </div>
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="text-3xl font-bold text-gray-900">Puzzles</h1>
+          <div className="flex items-center gap-4">
+            <span className="text-sm font-medium text-gray-600">
+              Solved this session: {solvedThisSession}
+            </span>
+            <button
+              onClick={fetchPuzzle}
+              className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition"
+            >
+              <RotateCcw size={18} />
+              Skip
+            </button>
           </div>
         </div>
-      )}
 
-      <div className="flex flex-col items-center">
-        <div
-          className={`relative transition-all duration-300 ${
-            lastResult === "correct"
-              ? "ring-4 ring-green-400 rounded-xl"
-              : lastResult === "wrong"
-                ? "ring-4 ring-red-400 rounded-xl animate-shake"
-                : ""
-          }`}
-        >
-          <Chessboard
-            key={boardKey}
-            position={position}
-            boardWidth={Math.min(500, window.innerWidth - 200)}
-            boardOrientation={
-              displayPuzzle?.user_color === "white" ? "white" : "black"
-            }
-            onPieceDrop={onDrop}
-            onSquareClick={onSquareClick}
-            onArrowsChange={onArrowsChange}
-            arePiecesDraggable={canMakeMove}
-            areArrowsAllowed={true}
-            customBoardStyle={{
-              borderRadius: "8px",
-              boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-            }}
-            customSquareStyles={{
-              ...(displayPuzzle?.last_move
-                ? {
-                    [displayPuzzle.last_move.from_square]: {
-                      backgroundColor: "rgba(255, 255, 0, 0.4)",
+        <p className="text-gray-600 mb-6">
+          Find the best move from positions in your analyzed games. These are
+          positions where you played a mistake or blunder.
+        </p>
+
+        {displayPuzzle &&
+          (displayPuzzle.date_played ||
+            displayPuzzle.white_player ||
+            displayPuzzle.black_player) && (
+            <div className="mb-6 p-4 bg-white rounded-xl shadow-sm border border-gray-200 max-w-md mx-auto">
+              {displayPuzzle.date_played && (
+                <p className="text-sm text-gray-500 mb-2">
+                  {new Date(displayPuzzle.date_played).toLocaleDateString(
+                    undefined,
+                    {
+                      weekday: "short",
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
                     },
-                    [displayPuzzle.last_move.to_square]: {
-                      backgroundColor: "rgba(255, 255, 0, 0.6)",
-                    },
-                  }
-                : {}),
-              ...(arrowFromSquare
-                ? {
-                    [arrowFromSquare]: {
-                      backgroundColor: "rgba(34, 211, 238, 0.5)",
-                    },
-                  }
-                : {}),
-            }}
-            customArrows={
-              activeArrowQuestion
-                ? (arrowsByQuestion[activeArrowQuestion] ?? []).map(
-                    ([from, to]) => [from, to] as [string, string]
-                  )
-                : undefined
-            }
-          />
-          {lastResult === "correct" && (
-            <div className="absolute inset-0 flex items-center justify-center bg-green-500/20 rounded-xl pointer-events-none">
-              <span className="text-4xl font-bold text-green-700">Correct!</span>
+                  )}
+                </p>
+              )}
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1 text-right">
+                  <span className="font-medium text-gray-900">
+                    {displayPuzzle.white_player || "White"}
+                  </span>
+                  {displayPuzzle.white_elo != null && (
+                    <span className="ml-2 text-gray-500">
+                      ({displayPuzzle.white_elo})
+                    </span>
+                  )}
+                </div>
+                <span className="text-gray-400 font-medium">vs</span>
+                <div className="flex-1 text-left">
+                  <span className="font-medium text-gray-900">
+                    {displayPuzzle.black_player || "Black"}
+                  </span>
+                  {displayPuzzle.black_elo != null && (
+                    <span className="ml-2 text-gray-500">
+                      ({displayPuzzle.black_elo})
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           )}
-        </div>
 
-        {lastResult === "wrong" && (
-          <p className="mt-4 text-red-600 font-medium">Wrong move. Try again.</p>
-        )}
-
-        {activeArrowQuestion && (
-          <p className="mt-4 text-sm text-primary-600 font-medium">
-            Arrow mode: Right-click and drag from your piece to the destination
-            square. Valid moves will be added to the text box. Click the
-            question again to exit.
-          </p>
-        )}
-
-        {displayPuzzle && lastResult !== "correct" && (
-          <Link
-            to={`/games/${displayPuzzle.game_id}`}
-            className="mt-6 flex items-center gap-2 text-primary-600 hover:text-primary-700 font-medium"
+        <div className="flex flex-col items-center">
+          <div
+            className={`relative transition-all duration-300 ${
+              lastResult === "correct"
+                ? "ring-4 ring-green-400 rounded-xl"
+                : lastResult === "wrong"
+                  ? "ring-4 ring-red-400 rounded-xl animate-shake"
+                  : ""
+            }`}
           >
-            <ExternalLink size={18} />
-            View source game
-          </Link>
-        )}
-      </div>
+            <Chessboard
+              key={boardKey}
+              position={position}
+              boardWidth={Math.min(500, window.innerWidth - 200)}
+              boardOrientation={
+                displayPuzzle?.user_color === "white" ? "white" : "black"
+              }
+              onPieceDrop={onDrop}
+              onSquareClick={onSquareClick}
+              onArrowsChange={onArrowsChange}
+              arePiecesDraggable={canMakeMove}
+              areArrowsAllowed={true}
+              customBoardStyle={{
+                borderRadius: "8px",
+                boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+              }}
+              customSquareStyles={{
+                ...(displayPuzzle?.last_move
+                  ? {
+                      [displayPuzzle.last_move.from_square]: {
+                        backgroundColor: "rgba(255, 255, 0, 0.4)",
+                      },
+                      [displayPuzzle.last_move.to_square]: {
+                        backgroundColor: "rgba(255, 255, 0, 0.6)",
+                      },
+                    }
+                  : {}),
+                ...(arrowFromSquare
+                  ? {
+                      [arrowFromSquare]: {
+                        backgroundColor: "rgba(34, 211, 238, 0.5)",
+                      },
+                    }
+                  : {}),
+              }}
+              customArrows={
+                activeArrowQuestion
+                  ? (arrowsByQuestion[activeArrowQuestion] ?? []).map(
+                      ([from, to]) => [from, to] as [string, string],
+                    )
+                  : undefined
+              }
+            />
+            {lastResult === "correct" && (
+              <div className="absolute inset-0 flex items-center justify-center bg-green-500/20 rounded-xl pointer-events-none">
+                <span className="text-4xl font-bold text-green-700">
+                  Correct!
+                </span>
+              </div>
+            )}
+          </div>
+
+          {lastResult === "wrong" && (
+            <p className="mt-4 text-red-600 font-medium">
+              Wrong move. Try again.
+            </p>
+          )}
+
+          {activeArrowQuestion && (
+            <p className="mt-4 text-sm text-primary-600 font-medium">
+              Arrow mode: Right-click and drag from your piece to the
+              destination square. Valid moves will be added to the text box.
+              Click the question again to exit.
+            </p>
+          )}
+
+          {displayPuzzle && lastResult !== "correct" && (
+            <Link
+              to={`/games/${displayPuzzle.game_id}`}
+              className="mt-6 flex items-center gap-2 text-primary-600 hover:text-primary-700 font-medium"
+            >
+              <ExternalLink size={18} />
+              View source game
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Progress bar - right side */}

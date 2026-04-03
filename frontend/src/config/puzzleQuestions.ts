@@ -2,6 +2,7 @@
  * Configurable puzzle questions shown before the user can make a move.
  * Add, remove, or reorder questions to customize the thinking process for different users.
  */
+
 export interface PuzzleQuestion {
   id: string;
   label: string;
@@ -10,6 +11,8 @@ export interface PuzzleQuestion {
   type?: "text" | "textarea";
   /** When set, clicking this question enables arrow-drawing mode on the board to add moves */
   arrowMode?: "checks" | "captures" | "attacks";
+  /** Clickable label for "none" / "no" (e.g. "No threat", "No") – fills the answer when clicked */
+  noOptionLabel?: string;
 }
 
 export const PUZZLE_QUESTIONS: PuzzleQuestion[] = [
@@ -17,23 +20,27 @@ export const PUZZLE_QUESTIONS: PuzzleQuestion[] = [
     id: "opponent_threat",
     label: "What is the opponent's threat?",
     placeholder: "Describe the threat...",
+    noOptionLabel: "No threat",
   },
   {
     id: "checks",
     label: "Do I have any checks?",
     placeholder: "Click to draw arrows, or type...",
     arrowMode: "checks",
+    noOptionLabel: "No",
   },
   {
     id: "captures",
     label: "Do I have any captures?",
     placeholder: "Click to draw arrows, or type...",
     arrowMode: "captures",
+    noOptionLabel: "No",
   },
   {
     id: "attacks",
     label: "Do I have any attacks?",
     placeholder: "Click to draw arrows, or type...",
     arrowMode: "attacks",
+    noOptionLabel: "No",
   },
 ];

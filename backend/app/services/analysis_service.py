@@ -241,17 +241,23 @@ class AnalysisService:
                 
                 # Calculate centipawn loss using reused evaluations
                 cp_loss = None
+                eval_after_raw = eval_after  # Save before any mutation for storage and next-iteration reuse
                 eval_before_for_classification = eval_before
                 eval_after_for_classification = eval_after
-                
+
                 if eval_before is not None and eval_after is not None:
-                    # Flip evaluation based on whose turn it was
-                    # eval_before is from the perspective of the player who made the move
-                    # eval_after is from the perspective of the next player
+                    # Flip eval_before for black moves so both eval_before and eval_after
+                    # are from white's perspective before computing cp_loss.
+                    # eval_before (raw) is from side-to-move's perspective; for black that's black's POV.
+                    # eval_after (raw) is always from the next side-to-move's perspective; after a black
+                    # move that's white's POV — already the same perspective as flipped eval_before.
+                    # This keeps cp_loss consistent with the stored values:
+                    #   stored eval_before = -eval_before_raw (flipped)
+                    #   stored eval_after  = -eval_after_raw
+                    #   cp_loss = stored_eval_before + stored_eval_after
                     if not is_white_move:
                         eval_before = -eval_before
-                        eval_after = -eval_after
-                    
+
                     cp_loss = eval_before - eval_after
                     
                     # Only count user's moves in statistics
@@ -335,15 +341,15 @@ class AnalysisService:
                     "move_san": move_san,
                     "move_uci": move.uci(),
                     "evaluation_before": eval_before,
-                    "evaluation_after": -eval_after if eval_after is not None else None,  # Flip for next player
+                    "evaluation_after": -eval_after_raw if eval_after_raw is not None else None,  # Flip for next player
                     "best_move_uci": best_move.uci() if best_move else None,
                     "classification": classification,
                     "centipawn_loss": cp_loss, 
                     "coach_commentary": coach_commentary,
                 })
                 
-                # Reuse eval_after as eval_before for next move
-                eval_before = eval_after
+                # Reuse eval_after as eval_before for next move (use raw/unmutated value)
+                eval_before = eval_after_raw
                 best_move = next_best_move
                 
                 if not is_white_move:

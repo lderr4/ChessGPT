@@ -13,6 +13,11 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    watch: {
+      // Required for reliable HMR when running Vite inside Docker on Windows bind mounts.
+      usePolling: process.env.CHOKIDAR_USEPOLLING === 'true',
+      interval: Number(process.env.CHOKIDAR_INTERVAL ?? 100),
+    },
   },
 })
 
